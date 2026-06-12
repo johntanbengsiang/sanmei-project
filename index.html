@@ -109,9 +109,8 @@
 
             try {
                 // Ensure this points to your deployed Render service url
-                const apiEndpoint = 'https://sanmei-project.onrender.com/api/analyze';
-
-                const response = await fetch(apiEndpoint, {
+                
+                const response = await fetch("https://sanmei-project.onrender.com/api/analyze", {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ day: parseInt(day), month: parseInt(month), year: parseInt(year) })
