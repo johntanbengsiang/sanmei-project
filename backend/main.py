@@ -1,8 +1,6 @@
 import os
 import pandas as pd
 from google import genai
-gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
