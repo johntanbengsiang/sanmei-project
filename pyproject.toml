@@ -1,2 +1,14 @@
+[project]
+name = "sanmei-project"
+version = "0.1.0"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pandas",
+    "google-generativeai",
+    "python-dotenv",
+    "sxtwl",
+]
+
 [tool.vercel]
 entrypoint = "backend.main:app"
