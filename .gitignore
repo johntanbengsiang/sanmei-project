@@ -1,0 +1,19 @@
+# --- Environment ---
+.env
+.venv/
+env/
+venv/
+__pycache__/
+
+# --- Data/Config ---
+# Ignore the local data folder so you don't push local CSVs
+data/
+# Ignore any local database files or logs
+*.db
+*.log
+.DS_Store
+
+# --- IDE/System ---
+.vscode/
+.idea/
+.pytest_cache/
