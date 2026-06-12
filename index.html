@@ -6,19 +6,17 @@
     <title>Advanced Sanmeigaku Ecosystem</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 p-4 md:p-8 font-sans">
 
-    <div class="max-w-6xl mx-auto bg-white rounded-3xl shadow-xl p-6 md:p-10 border border-slate-200">
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-black text-indigo-950 tracking-tight">Sanmeigaku Complete Matrix</h1>
-            <p class="text-slate-500 mt-1">Interactive 3x3 Yin Chart, Proximity Vectors, and Gemini Core AI Synthesis.</p>
-        </header>
-
-        <div class="flex flex-wrap gap-4 justify-center items-center bg-slate-50 border border-slate-200 p-6 rounded-2xl mb-8">
+    <div class="flex flex-wrap gap-4 justify-center items-center bg-slate-50 border border-slate-200 p-6 rounded-2xl mb-8">
             <input type="number" id="day" placeholder="DD" class="w-20 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
             <input type="number" id="month" placeholder="MM" class="w-20 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
             <input type="number" id="year" placeholder="YYYY" class="w-32 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+            
+            <div class="cf-turnstile" data-sitekey="YOUR_SITE_KEY" data-theme="light"></div>
+
             <button onclick="calculateProfile()" id="execBtn" class="bg-indigo-900 hover:bg-indigo-800 text-white font-extrabold px-8 py-3 rounded-xl transition shadow-md">Map Destiny Grid</button>
         </div>
 
@@ -102,7 +100,13 @@
             const year = document.getElementById('year').value;
 
             if(!day || !month || !year) return alert("All date blocks require inputs.");
-
+   
+            // ADD TURNSTILE CHECK
+            const cfToken = turnstile.getResponse();
+            if (!cfToken) {
+                return alert("Please complete the security check before proceeding.");
+            }
+            
             document.getElementById('loader').classList.remove('hidden');
             document.getElementById('dashboard').classList.add('hidden');
             document.getElementById('metaDrawer').classList.add('hidden');
@@ -152,10 +156,12 @@
                 document.getElementById('dashboard').classList.remove('hidden');
 
             } catch(err) {
-                alert("Connection refused. Please check if your Render web server is active.");
+                alert(`Error: ${err.message}`);
                 console.error(err);
             } finally {
                 document.getElementById('loader').classList.add('hidden');
+                // RESET TURNSTILE AFTER EVERY ATTEMPT
+                turnstile.reset();
             }
         }
 
