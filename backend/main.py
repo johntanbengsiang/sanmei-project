@@ -151,6 +151,7 @@ def find_closest_profiles(user_head: str, user_chest: str, user_tenchu: str):
                 "name":      row.get("Name", "Unknown"),
                 "domain":    row.get("Career Domain", "Unknown"),
                 "themes":    row.get("Life Patterns or Behavioral Themes", "No context available"),
+                "birthdate": str(row.get("Birthdate", "")).strip(),
                 "proximity": int((score / 6) * 100)
             })
 
