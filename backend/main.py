@@ -43,6 +43,10 @@ HIDDEN_STEMS_TAKAO = {
     "午": "丁", "未": "己", "申": "庚", "酉": "辛", "戌": "辛", "亥": "壬"
 }
 
+@app.get("/")
+def read_root():
+    return {"message": "Sanmeigaku Engine is online"}
+    
 # --- 10 MAIN STARS ENGINE ---
 def calculate_10_star(day_stem: str, target_stem: str) -> str:
     elements = {"甲":0, "乙":0, "丙":1, "丁":1, "戊":2, "己":2, "庚":3, "辛":3, "壬":4, "癸":4}
