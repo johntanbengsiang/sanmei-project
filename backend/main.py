@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-import google.generativeai as genai
+from google import genai
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,8 +16,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # --- GEMINI CLIENT SETUP ---
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash')
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
 
 app = FastAPI()
 
