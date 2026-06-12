@@ -24,14 +24,22 @@ app = FastAPI()
 # Add your exact Vercel frontend URL(s) below. Include both with and without
 # trailing slash variants if needed. Also supports local dev on port 5500/3000.
 ALLOWED_ORIGINS = [
-    "https://sanmei-project.vercel.app",   # <-- update to your actual Vercel domain
+    "https://sanmei-project.vercel.app",                                        # Production alias (if set)
+    "https://sanmei-project-lsfau9q2f-johntanbengsiangs-projects.vercel.app",  # Current deployment URL
+    "http://localhost:3000",                                                     # Local dev
+    "http://localhost:5500",                                                     # Local dev (Live Server)
+    "http://127.0.0.1:5500",
 ]
+
+# Also allow any *.vercel.app preview URL from this project (covers future re-deploys)
+ALLOWED_ORIGIN_REGEX = r"https://sanmei-project-.*-johntanbengsiangs-projects\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["POST", "GET", "OPTIONS"],  # OPTIONS required for CORS preflight
+    allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
 )
 
