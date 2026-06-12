@@ -5,25 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sxtwl
-from fastapi import FastAPI, HTTPException, Request # Import Request
-from slowapi import Limiter, _rate_limit_exceeded_finder
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from fastapi.responses import JSONResponse
+import httpx  # NEW IMPORT FOR CLOUDFLARE API CALLS
 
-# Initialize the rate limiter tracking by client IP
-limiter = Limiter(key_func=get_remote_address)
-app = FastAPI()
-app.state.limiter = limiter
-
-# Catch rate limit errors gracefully
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Rate limit exceeded. Please try again later."}
-    )
-    
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -32,11 +15,12 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 
 app = FastAPI()
 
+# FIXED CORS CONFIGURATION
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://sanmei-project.vercel.app"], 
+    allow_origins=["https://sanmei-project.vercel.app"], # Must be your frontend URL
     allow_credentials=True,
-    allow_methods=["*"], 
+    allow_methods=["POST"],
     allow_headers=["*"],
 )
 
@@ -153,10 +137,30 @@ class BirthDate(BaseModel):
     day: int
     month: int
     year: int
+    cf_token: str
 
+# NEW VERIFICATION FUNCTION
+async def verify_turnstile(token: str) -> bool:
+    secret_key = os.getenv("TURNSTILE_SECRET_KEY")
+    if not secret_key:
+        print("WARNING: TURNSTILE_SECRET_KEY not set in environment.")
+        return False
+
+    url = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, data={
+            "secret": secret_key,
+            "response": token
+        })
+        result = response.json()
+        return result.get("success", False)
+        
 @app.post("/api/analyze")
-@limiter.limit("5/minute")
-async def analyze(dob: BirthDate, request: Request):
+async def analyze(dob: BirthDate):
+    # 1. VERIFY BOT PROTECTION FIRST
+    is_human = await verify_turnstile(dob.cf_token)
+    if not is_human:
+        raise HTTPException(status_code=403, detail="Security check failed. Please refresh and try again.")
     try:
         lunar_day = sxtwl.fromSolar(dob.year, dob.month, dob.day)
         y_gz = lunar_day.getYearGZ(True) 
