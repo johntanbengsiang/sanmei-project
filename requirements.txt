@@ -1,1 +1,7 @@
-pip install sxtwl
+fastapi
+uvicorn
+pandas
+google-generativeai
+python-dotenv
+python-dateutil
+sxtwl  # An excellent library for calculating precise Chinese/Japanese calendar stems and branches
