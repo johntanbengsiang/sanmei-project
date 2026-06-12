@@ -1,0 +1,4 @@
+backend/
+data/
+requirements.txt
+pyproject.toml
