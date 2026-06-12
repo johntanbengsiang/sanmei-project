@@ -30,7 +30,8 @@ try:
     df_database = pd.read_csv("data/Database.csv")
     
     for df in [df_10_stars, df_12_stars, df_tenchu_ref, df_database]:
-        df.columns = df.columns.str.strip()
+        if df is not None:
+            df.columns = df.columns.str.strip()
 except Exception as e:
     print(f"Data Loading Alert: Verify your CSV files are inside the backend data/ folder. Error: {e}")
 
@@ -89,6 +90,9 @@ def calculate_tenchusatsu(day_stem: str, day_branch: str) -> str:
 
 def find_closest_profiles(user_head: str, user_chest: str, user_tenchu: str):
     matches = []
+    if 'df_database' not in globals() or df_database is None or df_database.empty:
+        return matches
+        
     for _, row in df_database.iterrows():
         score = 0
         db_head = str(row.get('頭 (Head)', '')).strip()
@@ -102,12 +106,26 @@ def find_closest_profiles(user_head: str, user_chest: str, user_tenchu: str):
             
         if score > 0:
             matches.append({
-                "name": row['Name'],
-                "domain": row['Career Domain'],
-                "themes": row['Life Patterns or Behavioral Themes'],
+                "name": row.get('Name', 'Unknown'),
+                "domain": row.get('Career Domain', 'Unknown'),
+                "themes": row.get('Life Patterns or Behavioral Themes', 'No context available'),
                 "proximity": int((score / 6) * 100)
             })
     return sorted(matches, key=lambda x: x['proximity'], reverse=True)[:3]
+
+# --- GLOBAL DATABASE LOOKUP HELPER ---
+def get_meta_text(df, col, val, target_col):
+    try:
+        if df is None or df.empty or col not in df.columns or target_col not in df.columns:
+            return "System baseline blueprint details."
+        
+        # Strip suffixes to allow cross-matching between "貫索" and "貫索星"
+        clean_val = val.replace("星", "").replace("天中殺", "").strip()
+        res = df[df[col].astype(str).str.contains(clean_val, na=False, case=False)]
+        
+        return res[target_col].values[0] if len(res) > 0 else "System baseline blueprint details."
+    except Exception:
+        return "System baseline blueprint details."
 
 class BirthDate(BaseModel):
     day: int
@@ -146,16 +164,9 @@ async def analyze(dob: BirthDate):
         tenchusatsu = calculate_tenchusatsu(day_stem, day_branch)
 
         # Look up descriptive text slices
-        def get_meta_text(df, col, val, target_col):
-        if df.empty: return "System baseline blueprint details."
-        # Strip suffixes to allow cross-matching between "貫索" and "貫索星"
-        clean_val = val.replace("星", "").replace("天中殺", "").strip()
-        res = df[df[col].astype(str).str.contains(clean_val, na=False, case=False)]
-        return res[target_col].values[0] if len(res) > 0 else "System baseline blueprint details."
-
         head_txt = get_meta_text(df_10_stars, '星', head_star, 'Core Traits (Corrected)')
         chest_txt = get_meta_text(df_10_stars, '星', chest_star, 'Core Traits (Corrected)')
-        tenchu_txt = get_meta_text(df_tenchu_ref, '天中殺', tenchusatsu, 'Core Meaning/Destiny Impact') if 'df_tenchu_ref' in locals() else "Time cycle variant."
+        tenchu_txt = get_meta_text(df_tenchu_ref, 'Type', tenchusatsu, 'Lifelong Traits')
 
         proximity_matches = find_closest_profiles(head_star, chest_star, tenchusatsu)
         top_match_text = f"Aligned life markers with {proximity_matches[0]['name']}: {proximity_matches[0]['themes']}" if proximity_matches else "Standalone trajectory."
