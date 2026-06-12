@@ -95,9 +95,10 @@ def find_closest_profiles(user_head: str, user_chest: str, user_tenchu: str):
         db_chest = str(row.get('胸 (Chest)', '')).strip()
         db_tenchu = str(row.get('Tenchusatsu', '')).strip()
         
-        if user_chest in db_chest: score += 3
-        if user_head in db_head: score += 2
-        if user_tenchu in db_tenchu: score += 1
+        # Check if DB substring exists inside calculated formal names
+        if db_chest and db_chest in user_chest: score += 3
+        if db_head and db_head in user_head: score += 2
+        if db_tenchu and db_tenchu in user_tenchu: score += 1
             
         if score > 0:
             matches.append({
@@ -146,8 +147,11 @@ async def analyze(dob: BirthDate):
 
         # Look up descriptive text slices
         def get_meta_text(df, col, val, target_col):
-            res = df[df[col].str.contains(val, na=False, case=False)] if not df.empty else []
-            return res[target_col].values[0] if len(res) > 0 else "System baseline blueprint details."
+        if df.empty: return "System baseline blueprint details."
+        # Strip suffixes to allow cross-matching between "貫索" and "貫索星"
+        clean_val = val.replace("星", "").replace("天中殺", "").strip()
+        res = df[df[col].astype(str).str.contains(clean_val, na=False, case=False)]
+        return res[target_col].values[0] if len(res) > 0 else "System baseline blueprint details."
 
         head_txt = get_meta_text(df_10_stars, '星', head_star, 'Core Traits (Corrected)')
         chest_txt = get_meta_text(df_10_stars, '星', chest_star, 'Core Traits (Corrected)')
