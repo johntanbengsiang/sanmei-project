@@ -16,9 +16,9 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://sanmei-project.onrender.com"],
+    allow_origins=["https://sanmei-project.vercel.app"], 
     allow_credentials=True,
-    allow_methods=["POST"],
+    allow_methods=["*"], 
     allow_headers=["*"],
 )
 
