@@ -16,8 +16,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # --- GEMINI CLIENT SETUP ---
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 app = FastAPI()
 
@@ -258,7 +257,7 @@ async def analyze(dob: BirthDate):
         Synthesize how these distinct structural points create tension and synthesis. Focus deeply on how the 12 Cycle Stars provide fuel/momentum to the core Main Stars, and how the {tenchusatsu} shapes their lifetime path. Format using clean Markdown headers. Do not repeat raw definitions.
         """
 
-        response = model.generate_content(prompt)
+        response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
 
         return {
             "chart": {
