@@ -89,7 +89,6 @@
                 <div id="aiOutput" class="prose prose-indigo max-w-none bg-white border border-slate-200 p-6 md:p-8 rounded-2xl shadow-sm text-slate-700 leading-relaxed space-y-4"></div>
             </div>
         </div>
-    </div>
 
     <script>
         let runtimeChart = null;
@@ -117,7 +116,7 @@
                 const response = await fetch("https://sanmei-project.onrender.com/api/analyze", {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ day: parseInt(day), month: parseInt(month), year: parseInt(year) })
+                    body: JSON.stringify({ day: parseInt(day), month: parseInt(month), year: parseInt(year), cf_token: cfToken })
                 });
 
                 if(!response.ok) throw new Error("API Pipeline Exception");
