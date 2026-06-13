@@ -3,189 +3,834 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Sanmeigaku Ecosystem</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>算命学 · Sanmeigaku</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --void:    #06060F;
+    --deep:    #0B0B18;
+    --card:    #10101E;
+    --raised:  #17172A;
+    --glow:    #1E1E35;
+    --ink:     rgba(255,255,255,0.04);
+    --vi:      #7C6FEB;
+    --vi-dim:  rgba(124,111,235,0.15);
+    --vi-glow: rgba(124,111,235,0.35);
+    --gold:    #E8B86D;
+    --gold-dim:rgba(232,184,109,0.12);
+    --teal:    #4ECDC4;
+    --teal-dim:rgba(78,205,196,0.12);
+    --rose:    #FF6B9D;
+    --t1:      #F0EEF8;
+    --t2:      #9E98BE;
+    --t3:      #524E6E;
+    --b1:      rgba(124,111,235,0.12);
+    --b2:      rgba(124,111,235,0.35);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+
+body{
+    background:var(--void);
+    color:var(--t1);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+    overflow-x:hidden;
+}
+
+/* ── STARS ── */
+#stars{position:fixed;inset:0;pointer-events:none;z-index:0}
+.s{position:absolute;border-radius:50%;background:#fff;
+   animation:twk var(--t) ease-in-out infinite alternate;
+   animation-delay:var(--d)}
+@keyframes twk{from{opacity:var(--lo)}to{opacity:var(--hi)}}
+
+/* ── PAGE ── */
+.page{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:0 1.5rem 6rem}
+
+/* ── HEADER ── */
+header{
+    text-align:center;
+    padding:3.5rem 0 2rem;
+    position:relative;
+}
+.kanji{
+    font-family:'Noto Serif JP',serif;
+    font-size:clamp(2.8rem,7vw,5rem);
+    font-weight:300;
+    letter-spacing:.25em;
+    background:linear-gradient(145deg,#a89cf5 0%,#7C6FEB 40%,#E8B86D 80%);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    line-height:1.1;margin-bottom:.4rem;
+}
+.romaji{
+    font-size:.65rem;letter-spacing:.45em;text-transform:uppercase;
+    color:var(--t3);font-weight:500;
+}
+.hairline{width:48px;height:1px;background:linear-gradient(90deg,transparent,var(--vi),transparent);margin:1.4rem auto}
+
+/* ── INPUT PANEL ── */
+.input-panel{
+    background:var(--card);
+    border:1px solid var(--b1);
+    border-radius:20px;
+    padding:1.75rem 2rem;
+    display:flex;flex-wrap:wrap;gap:1rem;
+    align-items:flex-end;justify-content:center;
+    margin-bottom:3rem;
+    box-shadow:0 0 60px rgba(124,111,235,.05);
+}
+.field-group{display:flex;gap:.6rem;align-items:flex-end}
+.field label{
+    display:block;font-size:.58rem;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--t3);margin-bottom:.35rem;text-align:center
+}
+.field input{
+    background:var(--raised);border:1px solid var(--b1);
+    color:var(--t1);border-radius:10px;padding:.7rem .5rem;
+    font-size:1.05rem;font-weight:600;text-align:center;
+    font-family:'Noto Serif JP',serif;outline:none;
+    transition:border-color .2s,box-shadow .2s;
+}
+.field input:focus{border-color:var(--vi);box-shadow:0 0 0 3px var(--vi-dim)}
+.field input[placeholder="DD"]{width:62px}
+.field input[placeholder="MM"]{width:62px}
+.field input[placeholder="YYYY"]{width:88px}
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+
+.btn{
+    background:linear-gradient(135deg,var(--vi),#5B50D9);
+    color:#fff;border:none;border-radius:11px;
+    padding:.8rem 1.8rem;font-size:.78rem;font-weight:700;
+    letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
+    transition:opacity .2s,transform .15s,box-shadow .2s;
+    box-shadow:0 4px 24px rgba(124,111,235,.35);
+    white-space:nowrap;
+}
+.btn:hover{opacity:.88;transform:translateY(-1px);box-shadow:0 6px 32px rgba(124,111,235,.5)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+
+/* ── LOADER ── */
+#loader{display:none;text-align:center;padding:4rem 0}
+.spinner{
+    width:42px;height:42px;
+    border:2px solid rgba(124,111,235,.15);
+    border-top-color:var(--vi);
+    border-radius:50%;animation:spin .75s linear infinite;
+    margin:0 auto 1.25rem
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader-msg{font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;color:var(--t3)}
+
+/* ── SECTION LABEL ── */
+.sec-head{
+    display:flex;align-items:center;gap:.9rem;margin-bottom:1.4rem;
+}
+.sec-head h2{
+    font-size:.6rem;letter-spacing:.32em;text-transform:uppercase;
+    color:var(--t3);white-space:nowrap;font-weight:600
+}
+.sec-head::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--b1),transparent)}
+
+/* ── DASHBOARD ── */
+#dashboard{display:none}
+.section{margin-bottom:2.8rem}
+
+/* ─────────────────────────────────────────
+   CHART GRID
+───────────────────────────────────────── */
+.chart-card{
+    background:var(--card);border:1px solid var(--b1);
+    border-radius:22px;padding:1.8rem;
+    position:relative;overflow:hidden;
+}
+.chart-card::before{
+    content:'';position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(124,111,235,.08),transparent);
+}
+.chart-topbar{
+    display:flex;justify-content:space-between;align-items:center;
+    margin-bottom:1.6rem;
+}
+.chart-title{
+    font-family:'Noto Serif JP',serif;font-size:1rem;font-weight:400;
+    color:var(--t1);letter-spacing:.08em;
+}
+.void-pill{
+    background:rgba(255,107,157,.1);border:1px solid rgba(255,107,157,.28);
+    color:var(--rose);font-size:.7rem;font-family:'Noto Serif JP',serif;
+    padding:.3rem .85rem;border-radius:100px;cursor:pointer;
+    transition:background .2s;letter-spacing:.04em;
+}
+.void-pill:hover{background:rgba(255,107,157,.2)}
+
+/* Two-column layout */
+.dual{
+    display:grid;
+    grid-template-columns:1fr 1px 1fr;
+    gap:0 1.5rem;
+}
+@media(max-width:640px){
+    .dual{grid-template-columns:1fr;gap:1.5rem 0}
+    .divider-v{display:none}
+}
+.divider-v{background:var(--b1)}
+.col-label{
+    text-align:center;font-size:.58rem;letter-spacing:.28em;
+    text-transform:uppercase;color:var(--t3);margin-bottom:1rem;font-weight:600
+}
+
+/* ── YIN GRID ── */
+.yin-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    grid-template-rows:auto auto auto auto;
+    gap:0;
+}
+/* Header row spanning 3 cols */
+.yin-col-header{
+    text-align:center;padding:.4rem .25rem .6rem;
+    font-size:.55rem;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--t3);font-weight:600;
+}
+.yin-cell{
+    border:1px solid rgba(124,111,235,.07);
+    padding:.65rem .3rem;text-align:center;
+    background:var(--raised);
+    transition:background .18s;
+}
+.yin-cell:hover{background:var(--glow)}
+/* Rounded corners on outer cells */
+.yin-cell.r-tl{border-radius:10px 0 0 0}
+.yin-cell.r-tr{border-radius:0 10px 0 0}
+.yin-cell.r-bl{border-radius:0 0 0 10px}
+.yin-cell.r-br{border-radius:0 0 10px 0}
+.yin-cell.highlight{background:rgba(124,111,235,.1);border-color:rgba(124,111,235,.22)}
+
+.yin-sub{font-size:.52rem;color:var(--t3);letter-spacing:.1em;margin-bottom:.25rem}
+.yin-val{
+    font-family:'Noto Serif JP',serif;font-size:1.15rem;font-weight:700;color:var(--t1)
+}
+.yin-val.day{color:var(--vi);font-size:1.2rem}
+
+/* Tenchusatsu footer in yin section */
+.yin-void-row{
+    margin-top:.8rem;
+    background:rgba(255,107,157,.07);
+    border:1px solid rgba(255,107,157,.18);
+    border-radius:10px;padding:.6rem;text-align:center;
+    cursor:pointer;transition:background .18s;
+}
+.yin-void-row:hover{background:rgba(255,107,157,.14)}
+.yin-void-label{font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,107,157,.55);margin-bottom:.25rem}
+.yin-void-val{font-family:'Noto Serif JP',serif;font-size:.95rem;color:var(--rose);letter-spacing:.05em}
+
+/* ── YANG GRID ── */
+/* Reference layout (3×3, positions matter):
+   [NW driver] [N head  ] [empty    ]
+   [W  hand  ] [C chest ] [E hand   ]
+   [SW driver] [S belly ] [SE driver]
+   Plus top-right area: [天印 top-right], [牽牛 right mid]
+   Matching the screenshot exactly:
+   Row0: empty   | 貫索  | 天印
+   Row1: 石門    | 牽牛  | 牽牛
+   Row2: 天堂    | 玉堂  | 天報
+*/
+.yang-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:.45rem;
+}
+.yang-cell{
+    border-radius:10px;padding:.6rem .3rem;
+    text-align:center;min-height:62px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;
+    transition:transform .15s,box-shadow .18s,background .15s;
+}
+.yang-cell:hover{transform:translateY(-2px)}
+.yang-cell.empty{background:transparent;border:1px dashed rgba(255,255,255,.04);cursor:default}
+.yang-cell.empty:hover{transform:none}
+
+.yang-cell.main{background:var(--raised);border:1px solid var(--b1)}
+.yang-cell.main:hover{background:var(--glow);box-shadow:0 4px 16px rgba(78,205,196,.1)}
+
+.yang-cell.core{
+    background:linear-gradient(140deg,rgba(124,111,235,.22),rgba(78,205,196,.12));
+    border:1px solid var(--vi);
+    box-shadow:0 0 24px rgba(124,111,235,.18),inset 0 0 24px rgba(124,111,235,.05);
+}
+.yang-cell.core:hover{box-shadow:0 0 32px rgba(124,111,235,.3),inset 0 0 24px rgba(124,111,235,.08)}
+
+.yang-cell.driver{background:var(--gold-dim);border:1px solid rgba(232,184,109,.2)}
+.yang-cell.driver:hover{background:rgba(232,184,109,.18);box-shadow:0 4px 14px rgba(232,184,109,.12)}
+
+.yc-label{font-size:.52rem;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-bottom:.3rem}
+.yang-cell.core .yc-label{color:rgba(165,150,255,.7)}
+.yang-cell.driver .yc-label{color:rgba(232,184,109,.5)}
+
+.yc-val{
+    font-family:'Noto Serif JP',serif;font-weight:700;line-height:1;font-size:.95rem;
+    color:var(--teal)
+}
+.yang-cell.core .yc-val{color:var(--gold);font-size:1.15rem}
+.yang-cell.driver .yc-val{color:var(--gold);font-size:.88rem}
+
+/* ── META DRAWER ── */
+#metaDrawer{
+    display:none;margin-top:1.25rem;
+    background:var(--void);border:1px solid var(--b2);
+    border-radius:14px;padding:1.25rem 1.5rem;
+    animation:sd .22s ease;
+}
+@keyframes sd{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+#drawerTitle{
+    font-size:.6rem;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--vi);margin-bottom:.65rem;font-weight:700
+}
+#drawerContent{font-size:.85rem;color:var(--t2);line-height:1.85}
+
+/* ─────────────────────────────────────────
+   PROXIMITY
+───────────────────────────────────────── */
+.prox-card{
+    background:var(--card);border:1px solid var(--b1);
+    border-radius:22px;padding:1.8rem;overflow:hidden;position:relative;
+}
+#proxViz{width:100%;height:360px;position:relative}
+#proxSvg{width:100%;height:100%}
+.prox-legend{
+    display:flex;gap:1.8rem;justify-content:center;
+    margin-top:1rem;flex-wrap:wrap
+}
+.leg{display:flex;align-items:center;gap:.45rem;font-size:.65rem;color:var(--t3);letter-spacing:.1em}
+.leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.d3tip{
+    position:absolute;background:var(--raised);border:1px solid var(--b2);
+    border-radius:12px;padding:.8rem 1rem;font-size:.75rem;color:var(--t1);
+    pointer-events:none;opacity:0;transition:opacity .15s;max-width:210px;
+    line-height:1.55;z-index:100;
+}
+.tn{font-weight:700;color:var(--gold);margin-bottom:.2rem;font-family:'Noto Serif JP',serif;font-size:.85rem}
+.td{color:var(--t3);font-size:.68rem}
+.tt{margin-top:.35rem;color:var(--t2);font-size:.7rem;line-height:1.5}
+
+/* ─────────────────────────────────────────
+   AI INTERPRETATION
+───────────────────────────────────────── */
+.ai-card{
+    background:var(--card);border:1px solid var(--b1);
+    border-radius:22px;padding:2.2rem;
+    position:relative;overflow:hidden;
+}
+.ai-card::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent,var(--vi) 35%,var(--teal) 65%,transparent);
+}
+.ai-header{
+    display:flex;align-items:center;gap:.7rem;
+    margin-bottom:1.5rem;padding-bottom:1.25rem;
+    border-bottom:1px solid var(--b1);
+}
+.ai-dot{
+    width:7px;height:7px;border-radius:50%;background:var(--teal);
+    animation:dotpulse 1.6s ease-in-out infinite;
+}
+.ai-dot.done{background:var(--gold);animation:none}
+@keyframes dotpulse{
+    0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(78,205,196,.4)}
+    50%{opacity:.5;box-shadow:0 0 0 5px rgba(78,205,196,0)}
+}
+.ai-status{font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--t3)}
+
+#aiOut{font-size:.88rem;line-height:1.9;color:var(--t2)}
+#aiOut h1,#aiOut h2,#aiOut h3{
+    font-family:'Noto Serif JP',serif;font-weight:400;letter-spacing:.05em;
+    margin:1.8rem 0 .7rem;color:var(--t1)
+}
+#aiOut h1{font-size:1.25rem;color:#a89cf5}
+#aiOut h2{
+    font-size:1rem;padding-bottom:.5rem;
+    border-bottom:1px solid var(--b1)
+}
+#aiOut h3{font-size:.9rem;color:var(--teal)}
+#aiOut strong{color:var(--gold);font-weight:600}
+#aiOut em{color:#a89cf5;font-style:italic}
+#aiOut p{margin-bottom:.95rem}
+#aiOut ul,#aiOut ol{padding-left:1.4rem;margin-bottom:.95rem}
+#aiOut li{margin-bottom:.35rem}
+#aiOut li::marker{color:var(--vi)}
+#aiOut blockquote{
+    border-left:2px solid var(--vi);padding:.7rem 1.2rem;margin:1rem 0;
+    background:var(--raised);border-radius:0 8px 8px 0;
+    color:var(--t2);font-style:italic
+}
+#aiOut hr{border:none;border-top:1px solid var(--b1);margin:1.5rem 0}
+
+.shimmer{
+    height:13px;background:var(--raised);border-radius:6px;
+    margin-bottom:.7rem;animation:shim 1.6s ease-in-out infinite
+}
+@keyframes shim{0%,100%{opacity:.3}50%{opacity:.65}}
+</style>
 </head>
-<body class="bg-slate-100 min-h-screen text-slate-800 p-4 md:p-8 font-sans">
+<body>
 
-    <div class="flex flex-wrap gap-4 justify-center items-center bg-slate-50 border border-slate-200 p-6 rounded-2xl mb-8">
-            <input type="number" id="day" placeholder="DD" class="w-20 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
-            <input type="number" id="month" placeholder="MM" class="w-20 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
-            <input type="number" id="year" placeholder="YYYY" class="w-32 p-3 rounded-xl border text-center text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500">
-            
-            <div class="cf-turnstile" data-sitekey="0x4AAAAAADjf_8n6ghaTqRBf" data-theme="light"></div>
+<!-- STAR FIELD -->
+<div id="stars"></div>
 
-            <button onclick="calculateProfile()" id="execBtn" class="bg-indigo-900 hover:bg-indigo-800 text-white font-extrabold px-8 py-3 rounded-xl transition shadow-md">Map Destiny Grid</button>
-        </div>
+<div class="page">
 
-        <div id="loader" class="hidden text-center py-12 animate-pulse text-indigo-600">
-            <div class="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p class="font-bold">Building Multi-Pillar Matrices & Processing Context Strings...</p>
-        </div>
+<!-- HEADER -->
+<header>
+    <div class="kanji">算命学</div>
+    <div class="romaji">Sanmeigaku · Destiny Matrix System</div>
+    <div class="hairline"></div>
+</header>
 
-        <div id="dashboard" class="hidden space-y-8">
-            
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-950 shadow-inner">
-                <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
-                    <h2 class="text-lg font-bold text-slate-200 tracking-wider uppercase">☯ Structural Yin/Yang Chart Grid</h2>
-                    <span id="tenchuBadge" class="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-black px-3 py-1 rounded-full cursor-pointer" onclick="showMeta('Tenchusatsu')"></span>
-                </div>
-                
-                <div class="grid grid-cols-3 gap-3 md:gap-4 max-w-2xl mx-auto text-center">
-                    <div id="cell_nw" onclick="showMeta('NW')" class="p-4 bg-slate-800 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-300">
-                        <span class="text-[10px] uppercase text-slate-500 font-bold block mb-1">Right Shoulder</span>
-                        <div class="font-black text-sm md:text-base text-amber-400" id="val_nw"></div>
-                    </div>
-                    <div id="cell_n" onclick="showMeta('N')" class="p-4 bg-slate-800/80 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-100">
-                        <span class="text-[10px] uppercase text-indigo-400 font-bold block mb-1">Head (North)</span>
-                        <div class="font-black text-base md:text-lg" id="val_n"></div>
-                    </div>
-                    <div class="p-4 bg-slate-950/40 rounded-xl flex items-center justify-center text-xs text-slate-600 font-bold">
-                        [ 空白 ]
-                    </div>
+<!-- INPUT -->
+<div class="input-panel">
+    <div class="field-group">
+        <div class="field"><label>Day</label><input type="number" id="day" placeholder="DD" min="1" max="31"></div>
+        <div class="field"><label>Month</label><input type="number" id="month" placeholder="MM" min="1" max="12"></div>
+        <div class="field"><label>Year</label><input type="number" id="year" placeholder="YYYY" min="1900" max="2100"></div>
+    </div>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAADjf_8n6ghaTqRBf" data-theme="dark"></div>
+    <button class="btn" id="execBtn" onclick="calculateProfile()">Cast Destiny Grid</button>
+</div>
 
-                    <div id="cell_w" onclick="showMeta('W')" class="p-4 bg-slate-800/80 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-100">
-                        <span class="text-[10px] uppercase text-indigo-400 font-bold block mb-1">Right Hand (West)</span>
-                        <div class="font-black text-base md:text-lg" id="val_w"></div>
-                    </div>
-                    <div id="cell_c" onclick="showMeta('C')" class="p-4 bg-indigo-950 border-2 border-indigo-500 rounded-xl cursor-pointer hover:bg-indigo-900 transition text-white shadow-lg relative">
-                        <span class="text-[10px] uppercase text-indigo-300 font-bold block mb-1">Chest (Core)</span>
-                        <div class="font-black text-lg md:text-xl text-yellow-300" id="val_c"></div>
-                    </div>
-                    <div id="cell_e" onclick="showMeta('E')" class="p-4 bg-slate-800/80 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-100">
-                        <span class="text-[10px] uppercase text-indigo-400 font-bold block mb-1">Left Hand (East)</span>
-                        <div class="font-black text-base md:text-lg" id="val_e"></div>
-                    </div>
+<!-- LOADER -->
+<div id="loader">
+    <div class="spinner"></div>
+    <p class="loader-msg" id="loaderMsg">Aligning solar-lunar bridge…</p>
+</div>
 
-                    <div id="cell_sw" onclick="showMeta('SW')" class="p-4 bg-slate-800 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-300">
-                        <span class="text-[10px] uppercase text-slate-500 font-bold block mb-1">Right Leg</span>
-                        <div class="font-black text-sm md:text-base text-amber-400" id="val_sw"></div>
-                    </div>
-                    <div id="cell_s" onclick="showMeta('S')" class="p-4 bg-slate-800/80 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-100">
-                        <span class="text-[10px] uppercase text-indigo-400 font-bold block mb-1">Belly (South)</span>
-                        <div class="font-black text-base md:text-lg" id="val_s"></div>
-                    </div>
-                    <div id="cell_se" onclick="showMeta('SE')" class="p-4 bg-slate-800 border border-slate-700/50 rounded-xl cursor-pointer hover:bg-indigo-950 transition text-slate-300">
-                        <span class="text-[10px] uppercase text-slate-500 font-bold block mb-1">Left Leg</span>
-                        <div class="font-black text-sm md:text-base text-amber-400" id="val_se"></div>
+<!-- DASHBOARD -->
+<div id="dashboard">
+
+    <!-- ── CHART ── -->
+    <div class="section">
+        <div class="sec-head"><h2>陰陽星図 · Yin-Yang Chart Grid</h2></div>
+        <div class="chart-card">
+            <div class="chart-topbar">
+                <span class="chart-title">人体星図</span>
+                <span class="void-pill" id="voidPill" onclick="showMeta('void')"></span>
+            </div>
+
+            <div class="dual">
+                <!-- YIN -->
+                <div>
+                    <div class="col-label">陰占 · Yin Pillars</div>
+                    <div class="yin-grid" id="yinGrid"></div>
+                    <div class="yin-void-row" onclick="showMeta('void')">
+                        <div class="yin-void-label">天中殺</div>
+                        <div class="yin-void-val" id="voidVal"></div>
                     </div>
                 </div>
 
-                <div id="metaDrawer" class="hidden mt-6 bg-slate-950 border border-slate-800 p-5 rounded-2xl animate-fadeIn">
-                    <h4 id="drawerTitle" class="font-black text-indigo-400 text-sm tracking-wider uppercase mb-1"></h4>
-                    <p id="drawerContent" class="text-sm text-slate-300 leading-relaxed"></p>
+                <div class="divider-v"></div>
+
+                <!-- YANG -->
+                <div>
+                    <div class="col-label">陽占 · Human Body Stars</div>
+                    <div class="yang-grid" id="yangGrid"></div>
                 </div>
             </div>
 
-            <div>
-                <h2 class="text-xl font-bold mb-4 text-slate-900">👥 Database Relational Proximity</h2>
-                <div id="proximityMatrix" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
-            </div>
-
-            <div>
-                <h2 class="text-xl font-bold mb-4 text-slate-900">🧠 Advanced AI Generative Profile</h2>
-                <div id="aiOutput" class="prose prose-indigo max-w-none bg-white border border-slate-200 p-6 md:p-8 rounded-2xl shadow-sm text-slate-700 leading-relaxed space-y-4"></div>
+            <!-- META DRAWER -->
+            <div id="metaDrawer">
+                <div id="drawerTitle"></div>
+                <div id="drawerContent"></div>
             </div>
         </div>
+    </div>
 
-    <script>
-        let runtimeChart = null;
+    <!-- ── PROXIMITY ── -->
+    <div class="section">
+        <div class="sec-head"><h2>歴史的近接 · Historical Proximity Matrix</h2></div>
+        <div class="prox-card">
+            <div id="proxViz">
+                <svg id="proxSvg"></svg>
+            </div>
+            <div class="prox-legend">
+                <div class="leg"><div class="leg-dot" style="background:var(--gold)"></div>You</div>
+                <div class="leg"><div class="leg-dot" style="background:var(--vi)"></div>Closest Parallel</div>
+                <div class="leg"><div class="leg-dot" style="background:var(--teal)"></div>Secondary Matches</div>
+                <div class="leg"><div class="leg-dot" style="background:rgba(255,255,255,.15)"></div>Orbit = Similarity Distance</div>
+            </div>
+            <div class="d3tip" id="d3tip"></div>
+        </div>
+    </div>
 
-        async function calculateProfile() {
-            const day = document.getElementById('day').value;
-            const month = document.getElementById('month').value;
-            const year = document.getElementById('year').value;
+    <!-- ── AI ── -->
+    <div class="section">
+        <div class="sec-head"><h2>深層解釈 · Interpretation</h2></div>
+        <div class="ai-card">
+            <div class="ai-header">
+                <div class="ai-dot" id="aiDot"></div>
+                <span class="ai-status" id="aiStatus">Synthesizing cosmic interpretation…</span>
+            </div>
+            <div id="aiOut">
+                <div class="shimmer" style="width:83%"></div>
+                <div class="shimmer" style="width:67%"></div>
+                <div class="shimmer" style="width:91%"></div>
+                <div class="shimmer" style="width:58%"></div>
+                <div class="shimmer" style="width:76%"></div>
+                <div class="shimmer" style="width:88%"></div>
+            </div>
+        </div>
+    </div>
 
-            if(!day || !month || !year) return alert("All date blocks require inputs.");
-   
-            // ADD TURNSTILE CHECK
-            const cfToken = turnstile.getResponse();
-            if (!cfToken) {
-                return alert("Please complete the security check before proceeding.");
-            }
-            
-            document.getElementById('loader').classList.remove('hidden');
-            document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('metaDrawer').classList.add('hidden');
+</div><!-- /dashboard -->
+</div><!-- /page -->
 
-            try {
-                // Ensure this points to your deployed Render service url
-                
-                const response = await fetch("https://sanmei-project.onrender.com/api/analyze", {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ day: parseInt(day), month: parseInt(month), year: parseInt(year), cf_token: cfToken })
-                });
+<script>
+/* ── STARFIELD ── */
+(()=>{
+    const sf=document.getElementById('stars');
+    for(let i=0;i<110;i++){
+        const el=document.createElement('div');
+        el.className='s';
+        const sz=(Math.random()*1.8+.4).toFixed(1);
+        el.style.cssText=`width:${sz}px;height:${sz}px;`
+            +`left:${(Math.random()*100).toFixed(2)}%;`
+            +`top:${(Math.random()*100).toFixed(2)}%;`
+            +`--t:${(Math.random()*5+2).toFixed(1)}s;`
+            +`--d:-${(Math.random()*5).toFixed(1)}s;`
+            +`--lo:${(Math.random()*.15+.02).toFixed(2)};`
+            +`--hi:${(Math.random()*.55+.2).toFixed(2)};`;
+        sf.appendChild(el);
+    }
+})();
 
-                if(!response.ok) throw new Error("API Pipeline Exception");
-                const data = await response.json();
-                runtimeChart = data.chart;
+let runtimeChart=null;
 
-                // Map Grid Elements
-                document.getElementById('tenchuBadge').innerText = data.chart.tenchusatsu;
-                document.getElementById('val_n').innerText = data.chart.head;
-                document.getElementById('val_c').innerText = data.chart.chest;
-                document.getElementById('val_s').innerText = data.chart.stomach;
-                document.getElementById('val_e').innerText = data.chart.left_hand;
-                document.getElementById('val_w').innerText = data.chart.right_hand;
-                document.getElementById('val_nw').innerText = data.chart.right_shoulder;
-                document.getElementById('val_sw').innerText = data.chart.right_leg;
-                document.getElementById('val_se').innerText = data.chart.left_leg;
+/* ── YIN GRID ── */
+function buildYinGrid(p){
+    const g=document.getElementById('yinGrid');
+    g.innerHTML='';
 
-                // Render Proximity Framework
-                const proxContainer = document.getElementById('proximityMatrix');
-                proxContainer.innerHTML = '';
-                
-                data.proximity_chart.forEach(item => {
-                    proxContainer.innerHTML += `
-                        <div class="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
-                            <div class="flex justify-between items-center mb-2">
-                                <h3 class="font-extrabold text-slate-900">${item.name}</h3>
-                                <span class="text-xs px-2 py-0.5 rounded-md font-bold bg-indigo-50 border border-indigo-200 text-indigo-700">${item.proximity}% Alignment</span>
-                            </div>
-                            <p class="text-xs font-medium text-slate-400 mb-2">${item.domain}</p>
-                            <p class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">${item.themes}</p>
-                        </div>
-                    `;
-                });
+    // Column headers (3 cols)
+    const cols=['年柱 Year','月柱 Month','日柱 Day'];
+    cols.forEach((c,i)=>{
+        const el=document.createElement('div');
+        el.className='yin-col-header';
+        el.textContent=c;
+        g.appendChild(el);
+    });
 
-                document.getElementById('aiOutput').innerHTML = marked.parse(data.ai_synthesis);
-                document.getElementById('dashboard').classList.remove('hidden');
+    // Row 1 – Heavenly Stems (天干)
+    const stems=[
+        {sub:'天干 Stem',val:p.year_stem,  cls:'r-tl'},
+        {sub:'天干 Stem',val:p.month_stem, cls:''},
+        {sub:'天干 Stem',val:p.day_stem,   cls:'r-tr day highlight'},
+    ];
+    // Row 2 – Earthly Branches (地支)
+    const branches=[
+        {sub:'地支 Branch',val:p.year_branch,  cls:''},
+        {sub:'地支 Branch',val:p.month_branch, cls:''},
+        {sub:'地支 Branch',val:p.day_branch,   cls:'day highlight'},
+    ];
+    // Row 3 – Hidden Stems (蔵干)
+    const hidden=[
+        {sub:'蔵干 Hidden',val:p.year_hidden,  cls:'r-bl'},
+        {sub:'蔵干 Hidden',val:p.month_hidden, cls:''},
+        {sub:'蔵干 Hidden',val:p.day_hidden,   cls:'r-br day highlight'},
+    ];
 
-            } catch(err) {
-                alert(`Error: ${err.message}`);
-                console.error(err);
-            } finally {
-                document.getElementById('loader').classList.add('hidden');
-                // RESET TURNSTILE AFTER EVERY ATTEMPT
-                turnstile.reset();
-            }
+    [...stems,...branches,...hidden].forEach(c=>{
+        const el=document.createElement('div');
+        el.className='yin-cell '+(c.cls||'');
+        el.innerHTML=`<div class="yin-sub">${c.sub}</div>`
+            +`<div class="yin-val ${c.cls.includes('day')?'day':''}">${c.val||'—'}</div>`;
+        g.appendChild(el);
+    });
+}
+
+/* ── YANG GRID ── */
+/* Layout:
+   [NW driver right shoulder] [N  main head   ] [empty         ]
+   [W  main  right hand     ] [C  core chest  ] [E main left   ]
+   [SW driver right leg     ] [S  main stomach] [SE driver left leg]
+*/
+function buildYangGrid(chart){
+    const g=document.getElementById('yangGrid');
+    g.innerHTML='';
+    const cells=[
+        {lbl:'右肩',sub:'Right Shoulder',val:chart.right_shoulder,cls:'driver',pos:'NW'},
+        {lbl:'頭',  sub:'Head · North',  val:chart.head,          cls:'main',  pos:'N'},
+        {lbl:'',    sub:'',              val:'',                   cls:'empty', pos:''},
+        {lbl:'右手',sub:'Right Hand',    val:chart.right_hand,     cls:'main',  pos:'W'},
+        {lbl:'胸',  sub:'Chest · Core',  val:chart.chest,          cls:'core',  pos:'C'},
+        {lbl:'左手',sub:'Left Hand',     val:chart.left_hand,      cls:'main',  pos:'E'},
+        {lbl:'右脚',sub:'Right Leg',     val:chart.right_leg,      cls:'driver',pos:'SW'},
+        {lbl:'腹',  sub:'Stomach · South',val:chart.stomach,       cls:'main',  pos:'S'},
+        {lbl:'左脚',sub:'Left Leg',      val:chart.left_leg,       cls:'driver',pos:'SE'},
+    ];
+    cells.forEach(c=>{
+        const el=document.createElement('div');
+        el.className='yang-cell '+c.cls;
+        if(c.cls!=='empty'){
+            el.innerHTML=`<div class="yc-label">${c.lbl}</div><div class="yc-val">${c.val}</div>`;
+            if(c.pos) el.onclick=()=>showMeta(c.pos);
+        }
+        g.appendChild(el);
+    });
+}
+
+/* ── META DRAWER ── */
+function showMeta(pos){
+    if(!runtimeChart) return;
+    const drawer=document.getElementById('metaDrawer');
+    const title =document.getElementById('drawerTitle');
+    const body  =document.getElementById('drawerContent');
+    drawer.style.display='block';
+    const map={
+        N:   [`頭星 · Head (North) · ${runtimeChart.head}`,       runtimeChart.head_meaning],
+        C:   [`胸星 · Chest Core · ${runtimeChart.chest}`,        runtimeChart.chest_meaning],
+        void:[`天中殺 · Cosmic Void · ${runtimeChart.tenchusatsu}`,runtimeChart.tenchusatsu_meaning],
+    };
+    if(map[pos]){
+        title.textContent=map[pos][0];
+        body.textContent =map[pos][1];
+    } else {
+        title.textContent='Position Note';
+        body.textContent='Click the 頭 Head or 胸 Chest stars for full trait definitions. Click the Tenchusatsu void marker for karmic void analysis.';
+    }
+}
+
+/* ── PROXIMITY D3 ── */
+function buildProximity(matches, inputDate){
+    const wrap=document.getElementById('proxViz');
+    const svg=d3.select('#proxSvg');
+    svg.selectAll('*').remove();
+
+    const W=wrap.clientWidth||700, H=350;
+    svg.attr('viewBox',`0 0 ${W} ${H}`);
+
+    const cx=W/2, cy=H/2;
+    const palette=['#7C6FEB','#4ECDC4','#9B8FF5'];
+
+    // Build nodes
+    const nodes=[{
+        id:'you',name:'You',sub:inputDate,
+        prox:100,x:cx,y:cy,r:20,color:'#E8B86D',isYou:true
+    }];
+    matches.forEach((m,i)=>{
+        // Distance inversely proportional to proximity
+        const dist=75+(100-m.proximity)*1.1;
+        const angle=-Math.PI/2+(i*(2.5))+(i===0?0:.3);
+        nodes.push({
+            id:m.name,name:m.name,
+            sub:m.domain+(m.birthdate?' · '+m.birthdate:''),
+            themes:m.themes,prox:m.proximity,
+            x:cx+Math.cos(angle)*dist,
+            y:cy+Math.sin(angle)*dist*.65,
+            r: i===0?16:13,
+            color:palette[i]||'#4ECDC4',isYou:false
+        });
+    });
+
+    // Defs
+    const defs=svg.append('defs');
+    const filt=defs.append('filter').attr('id','glow');
+    filt.append('feGaussianBlur').attr('stdDeviation','4').attr('result','blur');
+    const fm=filt.append('feMerge');
+    fm.append('feMergeNode').attr('in','blur');
+    fm.append('feMergeNode').attr('in','SourceGraphic');
+
+    // Orbit rings
+    [80,140,195,245].forEach(r=>{
+        svg.append('circle')
+            .attr('cx',cx).attr('cy',cy).attr('r',r)
+            .attr('fill','none')
+            .attr('stroke','rgba(124,111,235,0.07)')
+            .attr('stroke-dasharray','3 6');
+    });
+
+    // Connection lines with gradients
+    matches.forEach((m,i)=>{
+        const n=nodes[i+1];
+        const gid=`lg${i}`;
+        const lg=defs.append('linearGradient').attr('id',gid)
+            .attr('gradientUnits','userSpaceOnUse')
+            .attr('x1',cx).attr('y1',cy).attr('x2',n.x).attr('y2',n.y);
+        lg.append('stop').attr('offset','0%').attr('stop-color','#E8B86D').attr('stop-opacity',.6);
+        lg.append('stop').attr('offset','100%').attr('stop-color',n.color).attr('stop-opacity',.15);
+
+        svg.append('line')
+            .attr('x1',cx).attr('y1',cy).attr('x2',n.x).attr('y2',n.y)
+            .attr('stroke',`url(#${gid})`).attr('stroke-width',1.5)
+            .attr('stroke-dasharray','5 4').attr('opacity',0)
+            .transition().duration(900).delay(400+i*180).attr('opacity',1);
+    });
+
+    // Similarity label on lines
+    matches.forEach((m,i)=>{
+        const n=nodes[i+1];
+        const mx=(cx+n.x)/2, my=(cy+n.y)/2;
+        svg.append('text')
+            .attr('x',mx).attr('y',my-6)
+            .attr('text-anchor','middle')
+            .attr('font-size','9px')
+            .attr('fill',n.color).attr('opacity',0)
+            .text(`${m.proximity}% match`)
+            .transition().duration(600).delay(900+i*180).attr('opacity',.75);
+    });
+
+    // Node groups
+    const tip=document.getElementById('d3tip');
+    const ng=svg.selectAll('.nd').data(nodes).enter().append('g')
+        .attr('class','nd')
+        .attr('transform',d=>`translate(${d.x},${d.y})`);
+
+    // Aura ring
+    ng.append('circle').attr('r',d=>d.r+10)
+        .attr('fill',d=>d.color).attr('opacity',0.07);
+
+    // Main node
+    ng.append('circle').attr('r',d=>d.r)
+        .attr('fill',d=>d.color).attr('opacity',0)
+        .attr('filter','url(#glow)')
+        .transition().duration(700).delay((d,i)=>i*130)
+        .attr('opacity',d=>d.isYou?.92:.82);
+
+    // Inner text
+    ng.filter(d=>!d.isYou).append('text')
+        .attr('text-anchor','middle').attr('dy','.35em')
+        .attr('font-size','9px').attr('fill','#fff')
+        .attr('font-weight','700').attr('opacity',0)
+        .text(d=>`${d.prox}%`)
+        .transition().duration(600).delay((d,i)=>i*130+250).attr('opacity',.95);
+
+    // You star
+    ng.filter(d=>d.isYou).append('text')
+        .attr('text-anchor','middle').attr('dy','.35em')
+        .attr('font-size','12px').attr('fill','#fff').attr('opacity',0)
+        .text('★')
+        .transition().duration(600).delay(100).attr('opacity',1);
+
+    // Name labels
+    ng.append('text')
+        .attr('text-anchor','middle').attr('dy',d=>d.r+14)
+        .attr('font-size',d=>d.isYou?'11px':'10px')
+        .attr('fill',d=>d.color)
+        .attr('font-family','Noto Serif JP,serif').attr('opacity',0)
+        .text(d=>d.name)
+        .transition().duration(600).delay((d,i)=>i*130+300).attr('opacity',1);
+
+    // Tooltip interaction
+    ng.filter(d=>!d.isYou).style('cursor','pointer')
+        .on('mouseover',function(event,d){
+            const r=wrap.getBoundingClientRect();
+            tip.style.opacity='1';
+            tip.style.left=(event.clientX-r.left+14)+'px';
+            tip.style.top=(event.clientY-r.top-10)+'px';
+            tip.innerHTML=`<div class="tn">${d.name}</div>`
+                +`<div class="td">${d.sub}</div>`
+                +`<div class="tt">${(d.themes||'').substring(0,130)}…</div>`;
+            d3.select(this).select('circle:nth-child(2)').transition().duration(150).attr('opacity',1);
+        })
+        .on('mousemove',function(event){
+            const r=wrap.getBoundingClientRect();
+            tip.style.left=(event.clientX-r.left+14)+'px';
+            tip.style.top=(event.clientY-r.top-10)+'px';
+        })
+        .on('mouseout',function(event,d){
+            tip.style.opacity='0';
+            d3.select(this).select('circle:nth-child(2)').transition().duration(150).attr('opacity',.82);
+        });
+}
+
+/* ── MAIN FLOW ── */
+async function calculateProfile(){
+    const day  =document.getElementById('day').value;
+    const month=document.getElementById('month').value;
+    const year =document.getElementById('year').value;
+    if(!day||!month||!year) return alert('Please enter a complete birthdate.');
+
+    const token=turnstile.getResponse();
+    if(!token) return alert('Please complete the security verification first.');
+
+    const btn=document.getElementById('execBtn');
+    btn.disabled=true;
+    document.getElementById('loader').style.display='block';
+    document.getElementById('dashboard').style.display='none';
+    document.getElementById('metaDrawer').style.display='none';
+
+    const msgs=[
+        'Aligning solar-lunar bridge…',
+        'Extracting heavenly stems & earthly branches…',
+        'Computing 60-cycle matrix…',
+        'Scanning historical parallels database…',
+        'Initiating AI synthesis…'
+    ];
+    let mi=0;
+    const tick=setInterval(()=>{
+        mi=(mi+1)%msgs.length;
+        document.getElementById('loaderMsg').textContent=msgs[mi];
+    },1800);
+
+    try{
+        const res=await fetch('https://sanmei-project.onrender.com/api/analyze',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                day:parseInt(day),month:parseInt(month),
+                year:parseInt(year),cf_token:token
+            })
+        });
+        if(!res.ok) throw new Error('API error '+res.status);
+        const data=await res.json();
+        runtimeChart=data.chart;
+
+        clearInterval(tick);
+        document.getElementById('loader').style.display='none';
+        document.getElementById('dashboard').style.display='block';
+
+        // Yin grid
+        if(data.chart.pillars){
+            buildYinGrid(data.chart.pillars);
         }
 
-        function showMeta(pos) {
-            if(!runtimeChart) return;
-            const drawer = document.getElementById('metaDrawer');
-            const title = document.getElementById('drawerTitle');
-            const body = document.getElementById('drawerContent');
-            
-            drawer.classList.remove('hidden');
+        // Yang grid
+        buildYangGrid(data.chart);
+        document.getElementById('voidPill').textContent='天中殺 · '+data.chart.tenchusatsu;
+        document.getElementById('voidVal').textContent=data.chart.tenchusatsu;
 
-            if(pos === 'N') {
-                title.innerText = `Head Star (North) • ${runtimeChart.head}`;
-                body.innerText = runtimeChart.head_meaning;
-            } else if(pos === 'C') {
-                title.innerText = `Chest Star (Core Ego) • ${runtimeChart.chest}`;
-                body.innerText = runtimeChart.chest_meaning;
-            } else if(pos === 'Tenchusatsu') {
-                title.innerText = `Active Cycle • ${runtimeChart.tenchusatsu}`;
-                body.innerText = runtimeChart.tenchusatsu_meaning;
-            } else {
-                title.innerText = "Yin Chart Position Map Element";
-                body.innerText = "Calculated relative structural value. Click the core 'Head' or 'Chest' stars to pull complete definitions parsed from your underlying database reference files.";
-            }
-        }
-    </script>
+        // Proximity
+        const dStr=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        buildProximity(data.proximity_chart||[],dStr);
+
+        // AI — shimmer while "loading", then reveal
+        document.getElementById('aiStatus').textContent='Synthesizing cosmic interpretation…';
+        document.getElementById('aiDot').className='ai-dot';
+        document.getElementById('aiOut').innerHTML=
+            ['83','67','91','58','76','88'].map(w=>
+                `<div class="shimmer" style="width:${w}%"></div>`).join('');
+
+        // Give a beat for the shimmer to show, then render
+        setTimeout(()=>{
+            document.getElementById('aiOut').innerHTML=marked.parse(data.ai_synthesis||'');
+            document.getElementById('aiStatus').textContent='Interpretation complete';
+            document.getElementById('aiDot').className='ai-dot done';
+        },750);
+
+    }catch(err){
+        clearInterval(tick);
+        document.getElementById('loader').style.display='none';
+        alert('Error: '+err.message);
+        console.error(err);
+    }finally{
+        btn.disabled=false;
+        turnstile.reset();
+    }
+}
+</script>
 </body>
 </html>
