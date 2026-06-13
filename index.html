@@ -79,11 +79,13 @@ header{
     border:1px solid var(--b1);
     border-radius:20px;
     padding:1.75rem 2rem;
-    display:flex;flex-wrap:wrap;gap:1rem;
-    align-items:flex-end;justify-content:center;
+    display:flex;flex-direction:column;gap:.9rem;
+    align-items:center;
     margin-bottom:3rem;
     box-shadow:0 0 60px rgba(124,111,235,.05);
 }
+.input-top-row{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;justify-content:center}
+.input-cf-row{display:flex;justify-content:center}
 .field-group{display:flex;gap:.6rem;align-items:flex-end}
 .field label{
     display:block;font-size:.58rem;letter-spacing:.22em;
@@ -302,8 +304,26 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     background:var(--card);border:1px solid var(--b1);
     border-radius:22px;padding:1.8rem;overflow:hidden;position:relative;
 }
-#proxViz{width:100%;height:360px;position:relative}
-#proxSvg{width:100%;height:100%}
+#proxViz{width:100%;height:480px;position:relative;overflow:hidden;border-radius:14px;background:var(--deep)}
+#proxSvg{width:100%;height:100%;cursor:grab}
+#proxSvg:active{cursor:grabbing}
+.prox-controls{
+    position:absolute;bottom:12px;right:12px;
+    display:flex;gap:.4rem;z-index:10;
+}
+.prox-btn{
+    background:var(--raised);border:1px solid var(--b1);
+    color:var(--t2);border-radius:8px;width:32px;height:32px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;font-size:1rem;transition:background .15s,color .15s;
+    user-select:none;
+}
+.prox-btn:hover{background:var(--glow);color:var(--t1)}
+.prox-hint{
+    position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    font-size:.58rem;letter-spacing:.15em;text-transform:uppercase;
+    color:var(--t3);pointer-events:none;white-space:nowrap;
+}
 .prox-legend{
     display:flex;gap:1.8rem;justify-content:center;
     margin-top:1rem;flex-wrap:wrap
@@ -311,10 +331,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 .leg{display:flex;align-items:center;gap:.45rem;font-size:.65rem;color:var(--t3);letter-spacing:.1em}
 .leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .d3tip{
-    position:absolute;background:var(--raised);border:1px solid var(--b2);
+    position:fixed;background:var(--raised);border:1px solid var(--b2);
     border-radius:12px;padding:.8rem 1rem;font-size:.75rem;color:var(--t1);
-    pointer-events:none;opacity:0;transition:opacity .15s;max-width:210px;
-    line-height:1.55;z-index:100;
+    pointer-events:none;opacity:0;transition:opacity .15s;max-width:220px;
+    line-height:1.55;z-index:9999;
 }
 .tn{font-weight:700;color:var(--gold);margin-bottom:.2rem;font-family:'Noto Serif JP',serif;font-size:.85rem}
 .td{color:var(--t3);font-size:.68rem}
@@ -395,13 +415,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
 <!-- INPUT -->
 <div class="input-panel">
-    <div class="field-group">
-        <div class="field"><label>Day</label><input type="number" id="day" placeholder="DD" min="1" max="31"></div>
-        <div class="field"><label>Month</label><input type="number" id="month" placeholder="MM" min="1" max="12"></div>
-        <div class="field"><label>Year</label><input type="number" id="year" placeholder="YYYY" min="1900" max="2100"></div>
+    <div class="input-top-row">
+        <div class="field-group">
+            <div class="field"><label>Day</label><input type="number" id="day" placeholder="DD" min="1" max="31"></div>
+            <div class="field"><label>Month</label><input type="number" id="month" placeholder="MM" min="1" max="12"></div>
+            <div class="field"><label>Year</label><input type="number" id="year" placeholder="YYYY" min="1900" max="2100"></div>
+        </div>
+        <button class="btn" id="execBtn" onclick="calculateProfile()">Cast Destiny Grid</button>
     </div>
-    <div class="cf-turnstile" data-sitekey="0x4AAAAAADjf_8n6ghaTqRBf" data-theme="dark"></div>
-    <button class="btn" id="execBtn" onclick="calculateProfile()">Cast Destiny Grid</button>
+    <div class="input-cf-row">
+        <div class="cf-turnstile" data-sitekey="0x4AAAAAADjf_8n6ghaTqRBf" data-theme="dark"></div>
+    </div>
 </div>
 
 <!-- LOADER -->
@@ -456,12 +480,18 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="prox-card">
             <div id="proxViz">
                 <svg id="proxSvg"></svg>
+                <div class="prox-hint">Scroll to zoom · Drag to pan · Hover nodes for details</div>
+                <div class="prox-controls">
+                    <div class="prox-btn" id="zoomIn" title="Zoom in">+</div>
+                    <div class="prox-btn" id="zoomOut" title="Zoom out">−</div>
+                    <div class="prox-btn" id="zoomReset" title="Reset view">⌖</div>
+                </div>
             </div>
             <div class="prox-legend">
                 <div class="leg"><div class="leg-dot" style="background:var(--gold)"></div>You</div>
                 <div class="leg"><div class="leg-dot" style="background:var(--vi)"></div>Closest Parallel</div>
                 <div class="leg"><div class="leg-dot" style="background:var(--teal)"></div>Secondary Matches</div>
-                <div class="leg"><div class="leg-dot" style="background:rgba(255,255,255,.15)"></div>Orbit = Similarity Distance</div>
+                <div class="leg"><div class="leg-dot" style="background:rgba(255,255,255,.15)"></div>Distance = Similarity</div>
             </div>
             <div class="d3tip" id="d3tip"></div>
         </div>
@@ -515,39 +545,37 @@ function buildYinGrid(p){
     const g=document.getElementById('yinGrid');
     g.innerHTML='';
 
-    // Column headers (3 cols)
     const cols=['年柱 Year','月柱 Month','日柱 Day'];
-    cols.forEach((c,i)=>{
+    cols.forEach(c=>{
         const el=document.createElement('div');
         el.className='yin-col-header';
         el.textContent=c;
         g.appendChild(el);
     });
 
-    // Row 1 – Heavenly Stems (天干)
     const stems=[
-        {sub:'天干 Stem',val:p.year_stem,  cls:'r-tl'},
-        {sub:'天干 Stem',val:p.month_stem, cls:''},
-        {sub:'天干 Stem',val:p.day_stem,   cls:'r-tr day highlight'},
+        {sub:'天干 Stem',  val:p.year_stem,   cls:'r-tl',        pillar:'year'},
+        {sub:'天干 Stem',  val:p.month_stem,  cls:'',             pillar:'month'},
+        {sub:'天干 Stem',  val:p.day_stem,    cls:'r-tr day highlight', pillar:'day'},
     ];
-    // Row 2 – Earthly Branches (地支)
     const branches=[
-        {sub:'地支 Branch',val:p.year_branch,  cls:''},
-        {sub:'地支 Branch',val:p.month_branch, cls:''},
-        {sub:'地支 Branch',val:p.day_branch,   cls:'day highlight'},
+        {sub:'地支 Branch',val:p.year_branch, cls:'',             pillar:'year'},
+        {sub:'地支 Branch',val:p.month_branch,cls:'',             pillar:'month'},
+        {sub:'地支 Branch',val:p.day_branch,  cls:'day highlight',pillar:'day'},
     ];
-    // Row 3 – Hidden Stems (蔵干)
     const hidden=[
-        {sub:'蔵干 Hidden',val:p.year_hidden,  cls:'r-bl'},
-        {sub:'蔵干 Hidden',val:p.month_hidden, cls:''},
-        {sub:'蔵干 Hidden',val:p.day_hidden,   cls:'r-br day highlight'},
+        {sub:'蔵干 Hidden',val:p.year_hidden, cls:'r-bl',         pillar:'year'},
+        {sub:'蔵干 Hidden',val:p.month_hidden,cls:'',             pillar:'month'},
+        {sub:'蔵干 Hidden',val:p.day_hidden,  cls:'r-br day highlight',pillar:'day'},
     ];
 
     [...stems,...branches,...hidden].forEach(c=>{
         const el=document.createElement('div');
         el.className='yin-cell '+(c.cls||'');
+        el.style.cursor='pointer';
         el.innerHTML=`<div class="yin-sub">${c.sub}</div>`
             +`<div class="yin-val ${c.cls.includes('day')?'day':''}">${c.val||'—'}</div>`;
+        el.onclick=()=>showMeta('yin_'+c.pillar);
         g.appendChild(el);
     });
 }
@@ -590,161 +618,272 @@ function showMeta(pos){
     const title =document.getElementById('drawerTitle');
     const body  =document.getElementById('drawerContent');
     drawer.style.display='block';
+    const p=runtimeChart;
+    const pillars=p.pillars||{};
+
+    // Cycle star note (driver cells — backend doesn't return per-driver meanings yet)
+    const cycleNote='These are 十二大従星 Cycle Stars — energy drivers that amplify or restrain the main stars. '
+        +'They indicate vitality level and life momentum. 天将星 marks peak authority energy; '
+        +'天印星 marks transitional, inward-turning energy.';
+
+    const yin_year_note=`年柱 Year Pillar — Stem: ${pillars.year_stem||'?'} · Branch: ${pillars.year_branch||'?'} · Hidden Stem: ${pillars.year_hidden||'?'}.
+
+The Year Pillar governs ancestral karma, the outer social identity, and energies inherited from family lineage. It reflects how others perceive you in a broader societal context.`;
+    const yin_month_note=`月柱 Month Pillar — Stem: ${pillars.month_stem||'?'} · Branch: ${pillars.month_branch||'?'} · Hidden Stem: ${pillars.month_hidden||'?'}.
+
+The Month Pillar governs career aptitude, life purpose momentum, and the environment of your working years (roughly ages 20–50). It is the engine of professional and creative expression.`;
+    const yin_day_note=`日柱 Day Pillar — Stem: ${pillars.day_stem||'?'} · Branch: ${pillars.day_branch||'?'} · Hidden Stem: ${pillars.day_hidden||'?'}.
+
+The Day Pillar is the Self — the most personal axis. The Day Stem is the ego anchor from which all ten Main Stars are calculated. The Day Branch and Hidden Stem define the inner emotional landscape and relationship patterns.`;
+
     const map={
-        N:   [`頭星 · Head (North) · ${runtimeChart.head}`,       runtimeChart.head_meaning],
-        C:   [`胸星 · Chest Core · ${runtimeChart.chest}`,        runtimeChart.chest_meaning],
-        void:[`天中殺 · Cosmic Void · ${runtimeChart.tenchusatsu}`,runtimeChart.tenchusatsu_meaning],
+        N:      [`頭星 · Head (北) · ${p.head}`,        p.head_meaning],
+        C:      [`胸星 · Chest Core · ${p.chest}`,      p.chest_meaning],
+        void:   [`天中殺 · Cosmic Void · ${p.tenchusatsu}`, p.tenchusatsu_meaning],
+        W:      [`右手星 · Right Hand · ${p.right_hand}`, `The Right Hand star (西) reflects your active, outward-facing relational style — how you engage with peers, partners, and collaborators in real-time interaction. Star: ${p.right_hand}.`],
+        E:      [`左手星 · Left Hand · ${p.left_hand}`,  `The Left Hand star (東) represents your receptive relational energy — how you receive support, attract allies, and draw resources toward you. Star: ${p.left_hand}.`],
+        S:      [`腹星 · Stomach (南) · ${p.stomach}`,  `The Stomach star (南) governs appetite, desire, physical vitality, and how you pursue pleasure and sustenance — your motivational fuel in daily life. Star: ${p.stomach}.`],
+        NW:     [`右肩星 · Right Shoulder · ${p.right_shoulder}`, cycleNote+`
+
+Your Right Shoulder cycle star is ${p.right_shoulder}, positioned at the NW axis of the Day Pillar.`],
+        SW:     [`右脚星 · Right Leg · ${p.right_leg}`, cycleNote+`
+
+Your Right Leg cycle star is ${p.right_leg}, positioned at the SW axis of the Month Pillar.`],
+        SE:     [`左脚星 · Left Leg · ${p.left_leg}`,   cycleNote+`
+
+Your Left Leg cycle star is ${p.left_leg}, positioned at the SE axis of the Year Pillar.`],
+        yin_year:  ['年柱 · Year Pillar', yin_year_note],
+        yin_month: ['月柱 · Month Pillar', yin_month_note],
+        yin_day:   ['日柱 · Day Pillar (Self Axis)', yin_day_note],
     };
     if(map[pos]){
         title.textContent=map[pos][0];
         body.textContent =map[pos][1];
     } else {
-        title.textContent='Position Note';
-        body.textContent='Click the 頭 Head or 胸 Chest stars for full trait definitions. Click the Tenchusatsu void marker for karmic void analysis.';
+        title.textContent='Position';
+        body.textContent='Select any star cell for its detailed interpretation.';
     }
 }
 
-/* ── PROXIMITY D3 ── */
+/* ── PROXIMITY D3 – force-directed + zoom/pan ── */
+let proxZoom=null;
+
 function buildProximity(matches, inputDate){
     const wrap=document.getElementById('proxViz');
+    const svgEl=document.getElementById('proxSvg');
     const svg=d3.select('#proxSvg');
     svg.selectAll('*').remove();
 
-    const W=wrap.clientWidth||700, H=350;
+    const W=wrap.clientWidth||700, H=480;
     svg.attr('viewBox',`0 0 ${W} ${H}`);
 
-    const cx=W/2, cy=H/2;
     const palette=['#7C6FEB','#4ECDC4','#9B8FF5'];
 
-    // Build nodes
-    const nodes=[{
-        id:'you',name:'You',sub:inputDate,
-        prox:100,x:cx,y:cy,r:20,color:'#E8B86D',isYou:true
-    }];
+    // ── Build node data ──
+    // Target distances based on proximity score
+    const nodes=[
+        {id:'you',name:'You',sub:inputDate,prox:100,r:26,color:'#E8B86D',isYou:true,
+         x:W/2+Math.random()*2,y:H/2+Math.random()*2}
+    ];
     matches.forEach((m,i)=>{
-        // Distance inversely proportional to proximity
-        const dist=75+(100-m.proximity)*1.1;
-        const angle=-Math.PI/2+(i*(2.5))+(i===0?0:.3);
         nodes.push({
             id:m.name,name:m.name,
             sub:m.domain+(m.birthdate?' · '+m.birthdate:''),
             themes:m.themes,prox:m.proximity,
-            x:cx+Math.cos(angle)*dist,
-            y:cy+Math.sin(angle)*dist*.65,
-            r: i===0?16:13,
-            color:palette[i]||'#4ECDC4',isYou:false
+            r: i===0?20:16,
+            color:palette[i]||'#4ECDC4',isYou:false,
+            targetDist: 60+(100-m.proximity)*2.2,  // lower prox = farther away
+            x:W/2+Math.cos(i*2.1)*120+Math.random()*20,
+            y:H/2+Math.sin(i*2.1)*90+Math.random()*20
         });
     });
 
-    // Defs
+    // Links: you → each match
+    const links=matches.map((_,i)=>({source:'you',target:nodes[i+1].id}));
+
+    // ── Defs ──
     const defs=svg.append('defs');
-    const filt=defs.append('filter').attr('id','glow');
-    filt.append('feGaussianBlur').attr('stdDeviation','4').attr('result','blur');
+    const filt=defs.append('filter').attr('id','ng');
+    filt.append('feGaussianBlur').attr('stdDeviation','5').attr('result','b');
     const fm=filt.append('feMerge');
-    fm.append('feMergeNode').attr('in','blur');
+    fm.append('feMergeNode').attr('in','b');
     fm.append('feMergeNode').attr('in','SourceGraphic');
 
-    // Orbit rings
-    [80,140,195,245].forEach(r=>{
-        svg.append('circle')
-            .attr('cx',cx).attr('cy',cy).attr('r',r)
+    // Radial bg glow
+    const rg=defs.append('radialGradient').attr('id','bgglow').attr('cx','50%').attr('cy','50%').attr('r','50%');
+    rg.append('stop').attr('offset','0%').attr('stop-color','#1a1535').attr('stop-opacity',.8);
+    rg.append('stop').attr('offset','100%').attr('stop-color','#06060F').attr('stop-opacity',1);
+
+    // ── Zoomable group ──
+    const zg=svg.append('g').attr('class','zoom-group');
+
+    // Background
+    svg.insert('rect','g').attr('width',W).attr('height',H).attr('fill',`url(#bgglow)`);
+
+    // ── Orbit rings (decorative, drawn in zg so they zoom too) ──
+    const orbitRings=zg.append('g').attr('class','orbit-rings');
+    [70,130,185,240,295].forEach((r,ri)=>{
+        orbitRings.append('circle')
+            .attr('cx',W/2).attr('cy',H/2).attr('r',r)
             .attr('fill','none')
-            .attr('stroke','rgba(124,111,235,0.07)')
-            .attr('stroke-dasharray','3 6');
+            .attr('stroke',ri===0?'rgba(232,184,109,0.12)':'rgba(124,111,235,0.05)')
+            .attr('stroke-dasharray',ri===0?'4 4':'2 8')
+            .attr('stroke-width',ri===0?1:.75);
     });
 
-    // Connection lines with gradients
+    // ── Link layer ──
+    const linkLayer=zg.append('g').attr('class','links');
+    // Build gradient per link
     matches.forEach((m,i)=>{
-        const n=nodes[i+1];
         const gid=`lg${i}`;
-        const lg=defs.append('linearGradient').attr('id',gid)
-            .attr('gradientUnits','userSpaceOnUse')
-            .attr('x1',cx).attr('y1',cy).attr('x2',n.x).attr('y2',n.y);
-        lg.append('stop').attr('offset','0%').attr('stop-color','#E8B86D').attr('stop-opacity',.6);
-        lg.append('stop').attr('offset','100%').attr('stop-color',n.color).attr('stop-opacity',.15);
-
-        svg.append('line')
-            .attr('x1',cx).attr('y1',cy).attr('x2',n.x).attr('y2',n.y)
-            .attr('stroke',`url(#${gid})`).attr('stroke-width',1.5)
-            .attr('stroke-dasharray','5 4').attr('opacity',0)
-            .transition().duration(900).delay(400+i*180).attr('opacity',1);
+        const lg=defs.append('linearGradient').attr('id',gid).attr('gradientUnits','userSpaceOnUse');
+        lg.append('stop').attr('offset','0%').attr('stop-color','#E8B86D').attr('stop-opacity',.5);
+        lg.append('stop').attr('offset','100%').attr('stop-color',palette[i]).attr('stop-opacity',.2);
     });
 
-    // Similarity label on lines
-    matches.forEach((m,i)=>{
-        const n=nodes[i+1];
-        const mx=(cx+n.x)/2, my=(cy+n.y)/2;
-        svg.append('text')
-            .attr('x',mx).attr('y',my-6)
-            .attr('text-anchor','middle')
-            .attr('font-size','9px')
-            .attr('fill',n.color).attr('opacity',0)
-            .text(`${m.proximity}% match`)
-            .transition().duration(600).delay(900+i*180).attr('opacity',.75);
-    });
+    const linkSel=linkLayer.selectAll('line').data(links).enter().append('line')
+        .attr('stroke',(d,i)=>`url(#lg${i})`)
+        .attr('stroke-width',1.8)
+        .attr('stroke-dasharray','6 4')
+        .attr('opacity',0);
 
-    // Node groups
+    // Midpoint labels on links
+    const linkLabels=linkLayer.selectAll('.ll').data(matches).enter().append('text')
+        .attr('class','ll')
+        .attr('text-anchor','middle')
+        .attr('font-size','9px')
+        .attr('fill',(d,i)=>palette[i])
+        .attr('opacity',0)
+        .text(d=>`${d.proximity}% match`);
+
+    // ── Node layer ──
+    const nodeLayer=zg.append('g').attr('class','nodes');
     const tip=document.getElementById('d3tip');
-    const ng=svg.selectAll('.nd').data(nodes).enter().append('g')
+
+    const ng2=nodeLayer.selectAll('.nd').data(nodes).enter().append('g')
         .attr('class','nd')
         .attr('transform',d=>`translate(${d.x},${d.y})`);
 
-    // Aura ring
-    ng.append('circle').attr('r',d=>d.r+10)
-        .attr('fill',d=>d.color).attr('opacity',0.07);
-
-    // Main node
-    ng.append('circle').attr('r',d=>d.r)
-        .attr('fill',d=>d.color).attr('opacity',0)
-        .attr('filter','url(#glow)')
-        .transition().duration(700).delay((d,i)=>i*130)
-        .attr('opacity',d=>d.isYou?.92:.82);
-
-    // Inner text
-    ng.filter(d=>!d.isYou).append('text')
-        .attr('text-anchor','middle').attr('dy','.35em')
-        .attr('font-size','9px').attr('fill','#fff')
-        .attr('font-weight','700').attr('opacity',0)
-        .text(d=>`${d.prox}%`)
-        .transition().duration(600).delay((d,i)=>i*130+250).attr('opacity',.95);
-
+    // Outer aura
+    ng2.append('circle').attr('r',d=>d.r+14).attr('fill',d=>d.color).attr('opacity',.05);
+    // Mid ring
+    ng2.append('circle').attr('r',d=>d.r+5).attr('fill','none')
+        .attr('stroke',d=>d.color).attr('stroke-width',.5).attr('opacity',.2);
+    // Main fill
+    ng2.append('circle').attr('r',d=>d.r).attr('fill',d=>d.color)
+        .attr('filter','url(#ng)').attr('opacity',0)
+        .transition().duration(800).delay((d,i)=>i*150)
+        .attr('opacity',d=>d.isYou?.9:.82);
     // You star
-    ng.filter(d=>d.isYou).append('text')
+    ng2.filter(d=>d.isYou).append('text')
+        .attr('text-anchor','middle').attr('dy','.4em')
+        .attr('font-size','16px').attr('fill','#fff').attr('opacity',0)
+        .text('★').transition().duration(600).delay(150).attr('opacity',1);
+    // Prox % badge
+    ng2.filter(d=>!d.isYou).append('text')
         .attr('text-anchor','middle').attr('dy','.35em')
-        .attr('font-size','12px').attr('fill','#fff').attr('opacity',0)
-        .text('★')
-        .transition().duration(600).delay(100).attr('opacity',1);
-
-    // Name labels
-    ng.append('text')
-        .attr('text-anchor','middle').attr('dy',d=>d.r+14)
-        .attr('font-size',d=>d.isYou?'11px':'10px')
+        .attr('font-size','10px').attr('fill','#fff').attr('font-weight','700').attr('opacity',0)
+        .text(d=>`${d.prox}%`)
+        .transition().duration(600).delay((d,i)=>i*150+280).attr('opacity',.95);
+    // Name label below
+    ng2.append('text')
+        .attr('text-anchor','middle').attr('dy',d=>d.r+18)
+        .attr('font-size',d=>d.isYou?'12px':'11px')
         .attr('fill',d=>d.color)
-        .attr('font-family','Noto Serif JP,serif').attr('opacity',0)
+        .attr('font-family','Noto Serif JP,serif').attr('font-weight','400').attr('opacity',0)
         .text(d=>d.name)
-        .transition().duration(600).delay((d,i)=>i*130+300).attr('opacity',1);
+        .transition().duration(700).delay((d,i)=>i*150+350).attr('opacity',1);
+    // Domain sub-label
+    ng2.filter(d=>!d.isYou).append('text')
+        .attr('text-anchor','middle').attr('dy',d=>d.r+32)
+        .attr('font-size','9px').attr('fill',d=>d.color).attr('opacity',0)
+        .text(d=>(d.sub||'').split('·')[0].trim().substring(0,20))
+        .transition().duration(600).delay((d,i)=>i*150+450).attr('opacity',.55);
 
-    // Tooltip interaction
-    ng.filter(d=>!d.isYou).style('cursor','pointer')
+    // ── Tooltip + hover ──
+    ng2.filter(d=>!d.isYou).style('cursor','pointer')
         .on('mouseover',function(event,d){
-            const r=wrap.getBoundingClientRect();
             tip.style.opacity='1';
-            tip.style.left=(event.clientX-r.left+14)+'px';
-            tip.style.top=(event.clientY-r.top-10)+'px';
+            tip.style.left=(event.clientX+16)+'px';
+            tip.style.top=(event.clientY-12)+'px';
             tip.innerHTML=`<div class="tn">${d.name}</div>`
                 +`<div class="td">${d.sub}</div>`
-                +`<div class="tt">${(d.themes||'').substring(0,130)}…</div>`;
-            d3.select(this).select('circle:nth-child(2)').transition().duration(150).attr('opacity',1);
+                +`<div class="tt">${(d.themes||'').substring(0,150)}…</div>`;
+            d3.select(this).select('circle:nth-child(3)')
+                .transition().duration(150).attr('opacity',1);
         })
         .on('mousemove',function(event){
-            const r=wrap.getBoundingClientRect();
-            tip.style.left=(event.clientX-r.left+14)+'px';
-            tip.style.top=(event.clientY-r.top-10)+'px';
+            tip.style.left=(event.clientX+16)+'px';
+            tip.style.top=(event.clientY-12)+'px';
         })
-        .on('mouseout',function(event,d){
+        .on('mouseout',function(){
             tip.style.opacity='0';
-            d3.select(this).select('circle:nth-child(2)').transition().duration(150).attr('opacity',.82);
+            d3.select(this).select('circle:nth-child(3)')
+                .transition().duration(150).attr('opacity',.82);
         });
+
+    // ── Drag ──
+    ng2.call(d3.drag()
+        .on('start',function(event,d){
+            if(!event.active) sim.alphaTarget(.3).restart();
+            d.fx=d.x;d.fy=d.y;
+        })
+        .on('drag',function(event,d){
+            d.fx=event.x;d.fy=event.y;
+        })
+        .on('end',function(event,d){
+            if(!event.active) sim.alphaTarget(0);
+            if(!d.isYou){d.fx=null;d.fy=null;}
+        })
+    );
+
+    // ── Force simulation ──
+    const sim=d3.forceSimulation(nodes)
+        .force('link',d3.forceLink(links)
+            .id(d=>d.id)
+            .distance(d=>{
+                const tgt=nodes.find(n=>n.id===d.target.id||n===d.target);
+                return tgt?tgt.targetDist:120;
+            })
+            .strength(.8))
+        .force('charge',d3.forceManyBody().strength(-80))
+        .force('center',d3.forceCenter(W/2,H/2).strength(.05))
+        .force('collide',d3.forceCollide(d=>d.r+30))
+        .on('tick',()=>{
+            // Pin "You" to center
+            const you=nodes[0];
+            you.x=W/2;you.y=H/2;you.vx=0;you.vy=0;
+
+            ng2.attr('transform',d=>`translate(${d.x},${d.y})`);
+
+            linkSel
+                .attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+                .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+
+            linkLabels
+                .attr('x',d=>{const t=nodes.find(n=>n.id===d.name||n.name===d.name);return t?(W/2+t.x)/2:W/2})
+                .attr('y',d=>{const t=nodes.find(n=>n.id===d.name||n.name===d.name);return t?(H/2+t.y)/2-8:H/2});
+        });
+
+    // Fade in links after simulation settles
+    setTimeout(()=>{
+        linkSel.transition().duration(600).attr('opacity',1);
+        linkLabels.transition().duration(600).attr('opacity',.7);
+    },800);
+
+    // ── Zoom behaviour ──
+    proxZoom=d3.zoom()
+        .scaleExtent([.4,4])
+        .on('zoom',({transform})=>zg.attr('transform',transform));
+    svg.call(proxZoom);
+
+    // Control buttons
+    document.getElementById('zoomIn').onclick=()=>
+        svg.transition().duration(300).call(proxZoom.scaleBy,1.4);
+    document.getElementById('zoomOut').onclick=()=>
+        svg.transition().duration(300).call(proxZoom.scaleBy,.72);
+    document.getElementById('zoomReset').onclick=()=>
+        svg.transition().duration(400).call(proxZoom.transform,d3.zoomIdentity);
 }
 
 /* ── MAIN FLOW ── */
