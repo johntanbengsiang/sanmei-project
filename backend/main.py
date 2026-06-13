@@ -281,7 +281,18 @@ async def analyze(dob: BirthDate):
                 "right_leg":        right_leg,
                 "left_leg":         left_leg,
                 "tenchusatsu":      tenchusatsu,
-                "tenchusatsu_meaning": tenchu_txt
+                "tenchusatsu_meaning": tenchu_txt,
+                "pillars": {
+                    "year_stem":    year_stem,
+                    "year_branch":  year_branch,
+                    "year_hidden":  year_hidden,
+                    "month_stem":   month_stem,
+                    "month_branch": month_branch,
+                    "month_hidden": month_hidden,
+                    "day_stem":     day_stem,
+                    "day_branch":   day_branch,
+                    "day_hidden":   day_hidden,
+                }
             },
             "proximity_chart": proximity_matches,
             "ai_synthesis":    response.text
