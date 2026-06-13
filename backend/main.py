@@ -73,8 +73,10 @@ HIDDEN_STEMS_TAKAO = {
     "午": "丁", "未": "己", "申": "庚", "酉": "辛", "戌": "辛", "亥": "壬"
 }
 
-# --- HEALTH CHECK ENDPOINT ---
-@app.get("/")
+# --- HEALTH CHECK ENDPOINTS ---
+# GET + HEAD on both / and /health so UptimeRobot works regardless of
+# which HTTP method or path its North-America nodes choose to send.
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     csv_status = {
         "10_Main_Stars": df_10_stars is not None,
@@ -83,6 +85,10 @@ def read_root():
         "Database": df_database is not None,
     }
     return {"message": "Sanmeigaku Engine is online", "data_loaded": csv_status}
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health():
+    return {"status": "ok"}
 
 # --- 10 MAIN STARS ENGINE ---
 def calculate_10_star(day_stem: str, target_stem: str) -> str:
