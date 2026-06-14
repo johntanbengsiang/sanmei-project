@@ -414,3 +414,99 @@ async def analyze(dob: BirthDate):
     except Exception as e:
         # Surface the real error message to help debugging
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── GALAXY MAP ──────────────────────────────────────────────────────────────
+# Returns the full database pre-processed for the galaxy.html visualisation.
+# Cached on the same TTL as the database itself (30 min).
+
+ELEMENT_MAP = {
+    '貫索': 'Wood', '石門': 'Wood',
+    '鳳閣': 'Fire', '調舒': 'Fire',
+    '祿存': 'Earth', '司祿': 'Earth',
+    '禄存': 'Earth', '司禄': 'Earth',   # simplified char variants
+    '車騎': 'Metal', '牽牛': 'Metal',
+    '龍高': 'Water', '玉堂': 'Water',
+}
+
+ARCHETYPE_DESC = {
+    'Wood/Fire':   'Visionary communicators — expressive, idealistic, influential storytellers',
+    'Wood/Metal':  'Principled achievers — disciplined, determined, competitive trailblazers',
+    'Wood/Water':  'Intellectual explorers — curious, adaptive, unconventional thinkers',
+    'Wood/Wood':   'Independent pioneers — autonomous, self-reliant, quietly resilient',
+    'Wood/Earth':  'Nurturing builders — patient, methodical, service-oriented',
+    'Fire/Wood':   'Charismatic leaders — persuasive, idealistic, bold reformers',
+    'Fire/Fire':   'Passionate performers — intense, expressive, emotionally powerful',
+    'Fire/Metal':  'Strategic innovators — driven, precise, achievement-oriented',
+    'Fire/Water':  'Empathetic visionaries — intuitive, humanitarian, transformative',
+    'Fire/Earth':  'Inspiring organizers — warm, productive, community-centred',
+    'Metal/Wood':  'Structured rebels — exacting, principled, reform-minded',
+    'Metal/Fire':  'Commanding presences — authoritative, ambitious, high-impact',
+    'Metal/Metal': 'Perfectionist powerhouses — rigorous, self-disciplined, relentless',
+    'Metal/Water': 'Analytical strategists — precise, perceptive, quietly formidable',
+    'Metal/Earth': 'Efficient pragmatists — systematic, dependable, institution-builders',
+    'Water/Wood':  'Wise advisors — insightful, nurturing, quietly influential',
+    'Water/Fire':  'Creative catalysts — imaginative, emotionally expressive, trend-setting',
+    'Water/Metal': 'Cerebral tacticians — observant, methodical, quietly powerful',
+    'Water/Water': 'Deep philosophers — introspective, empathetic, enduring impact',
+    'Water/Earth': 'Steady caretakers — patient, loyal, quietly transformative',
+    'Earth/Wood':  'Grounded visionaries — practical, progressive, community-driven',
+    'Earth/Fire':  'Warm motivators — generous, optimistic, people-centred',
+    'Earth/Metal': 'Reliable administrators — structured, loyal, institution-focused',
+    'Earth/Water': 'Intuitive mediators — empathetic, diplomatic, quietly wise',
+    'Earth/Earth': 'Steadfast pillars — reliable, traditional, long-term thinkers',
+}
+
+@app.get("/api/galaxy")
+def get_galaxy():
+    """Full database as nodes + within-cluster links for the galaxy visualisation."""
+    df = load_database()
+    if df.empty:
+        return {"nodes": [], "links": [], "archetypes": {}}
+
+    nodes = []
+    cluster_members: dict[str, list[str]] = {}
+
+    for _, r in df.iterrows():
+        name = str(r.get("Name", "")).strip()
+        if not name:
+            continue
+        h  = str(r.get("頭 (Head)", "")).strip()
+        c  = str(r.get("胸 (Chest)", "")).strip()
+        he = ELEMENT_MAP.get(h, "?")
+        ce = ELEMENT_MAP.get(c, "?")
+        arch = f"{he}/{ce}"
+
+        nodes.append({
+            "id":       name,
+            "name":     name,
+            "head":     h,
+            "chest":    c,
+            "tenchu":   str(r.get("Tenchusatsu", "")).strip(),
+            "domain":   str(r.get("Career Domain", "")).strip(),
+            "birthdate":str(r.get("Birthdate", "")).strip(),
+            "themes":   str(r.get("Life Patterns or Behavioral Themes", ""))[:280].strip(),
+            "wd_id":    str(r.get("wd_id", "")).strip(),
+            "head_el":  he,
+            "chest_el": ce,
+            "archetype": arch,
+        })
+        cluster_members.setdefault(arch, []).append(name)
+
+    # Links: only within-cluster (same head AND chest element pair).
+    # Cap at 6 members per cluster to keep link count reasonable (~1500 total).
+    from itertools import combinations as _comb
+    links = []
+    for arch, members in cluster_members.items():
+        for a, b in _comb(members[:6], 2):
+            links.append({"source": a, "target": b, "archetype": arch})
+
+    archetypes = {
+        arch: {
+            "count": len(members),
+            "description": ARCHETYPE_DESC.get(arch, ""),
+        }
+        for arch, members in cluster_members.items()
+    }
+
+    return {"nodes": nodes, "links": links, "archetypes": archetypes}
