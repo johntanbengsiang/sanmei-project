@@ -1,4 +1,6 @@
 import os
+import time
+import random
 import pandas as pd
 from google import genai
 from fastapi import FastAPI, HTTPException
@@ -14,6 +16,14 @@ load_dotenv()
 # Resolves data/ relative to this file's location, not the working directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# --- LIVE GOOGLE SHEET (growing database) ---
+# File > Share > Publish to web > select the "Candidates" tab > CSV > Publish,
+# then paste the resulting URL here as an env var on Render. The local
+# data/Database.csv (curated 1167) is always loaded too; the Sheet is
+# appended on top of it and re-fetched every CACHE_TTL_SECONDS.
+SHEET_CSV_URL = os.getenv("SHEET_CSV_URL", "")
+CACHE_TTL_SECONDS = 1800  # 30 min
 
 # --- GEMINI CLIENT SETUP ---
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -47,22 +57,62 @@ app.add_middleware(
 df_10_stars = None
 df_12_stars = None
 df_tenchu_ref = None
-df_database = None
 
 try:
     df_10_stars = pd.read_csv(os.path.join(DATA_DIR, "10_Main_Stars.csv"))
     df_12_stars = pd.read_csv(os.path.join(DATA_DIR, "12_Cycle_Stars.csv"))
     df_tenchu_ref = pd.read_csv(os.path.join(DATA_DIR, "Tenchusatsu.csv"))
-    df_database = pd.read_csv(os.path.join(DATA_DIR, "Database.csv"))
 
-    for df in [df_10_stars, df_12_stars, df_tenchu_ref, df_database]:
+    for df in [df_10_stars, df_12_stars, df_tenchu_ref]:
         if df is not None:
             df.columns = df.columns.str.strip()
 
-    print(f"[OK] All CSVs loaded successfully from: {DATA_DIR}")
+    print(f"[OK] Reference CSVs loaded from: {DATA_DIR}")
 
 except Exception as e:
-    print(f"[ERROR] CSV loading failed. DATA_DIR resolved to: {DATA_DIR}. Error: {e}")
+    print(f"[ERROR] Reference CSV loading failed. DATA_DIR resolved to: {DATA_DIR}. Error: {e}")
+
+# --- DATABASE LOADING (local curated set + live Google Sheet, cached) ---
+_db_cache = {"data": None, "ts": 0.0, "sheet_ok": False, "sheet_rows": 0, "local_rows": 0}
+
+def load_database() -> pd.DataFrame:
+    """Local data/Database.csv + (optionally) a published Google Sheet CSV,
+    concatenated and cached for CACHE_TTL_SECONDS so /api/analyze doesn't
+    hit Sheets on every request."""
+    now = time.time()
+    if _db_cache["data"] is not None and (now - _db_cache["ts"]) < CACHE_TTL_SECONDS:
+        return _db_cache["data"]
+
+    frames = []
+
+    try:
+        local = pd.read_csv(os.path.join(DATA_DIR, "Database.csv"))
+        local.columns = local.columns.str.strip()
+        frames.append(local)
+        _db_cache["local_rows"] = len(local)
+    except Exception as e:
+        print(f"[ERROR] local Database.csv failed to load: {e}")
+        _db_cache["local_rows"] = 0
+
+    _db_cache["sheet_ok"] = False
+    _db_cache["sheet_rows"] = 0
+    if SHEET_CSV_URL:
+        try:
+            sheet = pd.read_csv(SHEET_CSV_URL)
+            sheet.columns = sheet.columns.str.strip()
+            # Only include rows the Apps Script has finished enriching
+            if "Status" in sheet.columns:
+                sheet = sheet[sheet["Status"].astype(str).str.strip().str.upper() == "DONE"]
+            frames.append(sheet)
+            _db_cache["sheet_ok"] = True
+            _db_cache["sheet_rows"] = len(sheet)
+        except Exception as e:
+            print(f"[WARN] Google Sheet fetch failed, continuing with local only: {e}")
+
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    _db_cache["data"] = combined
+    _db_cache["ts"] = now
+    return combined
 
 # --- CONSTANTS ---
 STEMS = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"]
@@ -78,11 +128,15 @@ HIDDEN_STEMS_TAKAO = {
 # which HTTP method or path its North-America nodes choose to send.
 @app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
+    db = load_database()
     csv_status = {
         "10_Main_Stars": df_10_stars is not None,
         "12_Cycle_Stars": df_12_stars is not None,
         "Tenchusatsu": df_tenchu_ref is not None,
-        "Database": df_database is not None,
+        "database_total_rows": len(db),
+        "database_local_rows": _db_cache["local_rows"],
+        "database_sheet_connected": _db_cache["sheet_ok"],
+        "database_sheet_rows": _db_cache["sheet_rows"],
     }
     return {"message": "Sanmeigaku Engine is online", "data_loaded": csv_status}
 
@@ -137,31 +191,81 @@ def calculate_tenchusatsu(day_stem: str, day_branch: str) -> str:
     return mapping[void_offset]
 
 # --- HISTORICAL PROFILE MATCHER ---
-def find_closest_profiles(user_head: str, user_chest: str, user_tenchu: str):
+def find_matches(df: pd.DataFrame, head: str, chest: str, tenchu: str,
+                  exclude: set = None, top_n: int = 5) -> list:
+    """Score every row in df against (head, chest, tenchu) using the same
+    weights as before (chest=3, head=2, tenchu=1 -> /6 = proximity %).
+    Names in `exclude` are skipped (used to avoid repeats across the
+    mindmap). Ties are shuffled before sorting so repeated queries surface
+    different people from a tied group."""
+    exclude = exclude or set()
     matches = []
-    if df_database is None or df_database.empty:
+    if df is None or df.empty:
         return matches
 
-    for _, row in df_database.iterrows():
-        score = 0
+    for _, row in df.iterrows():
+        name = str(row.get("Name", "Unknown")).strip()
+        if name in exclude:
+            continue
+
         db_head   = str(row.get("頭 (Head)", "")).strip()
         db_chest  = str(row.get("胸 (Chest)", "")).strip()
         db_tenchu = str(row.get("Tenchusatsu", "")).strip()
 
-        if db_chest  and db_chest  in user_chest:  score += 3
-        if db_head   and db_head   in user_head:   score += 2
-        if db_tenchu and db_tenchu in user_tenchu: score += 1
+        score = 0
+        if db_chest  and db_chest  in chest:  score += 3
+        if db_head   and db_head   in head:   score += 2
+        if db_tenchu and db_tenchu in tenchu: score += 1
 
         if score > 0:
             matches.append({
-                "name":      row.get("Name", "Unknown"),
+                "name":      name,
                 "domain":    row.get("Career Domain", "Unknown"),
                 "themes":    row.get("Life Patterns or Behavioral Themes", "No context available"),
                 "birthdate": str(row.get("Birthdate", "")).strip(),
-                "proximity": int((score / 6) * 100)
+                "wd_id":     str(row.get("wd_id", "")).strip(),
+                "head": db_head, "chest": db_chest, "tenchu": db_tenchu,
+                "proximity": int((score / 6) * 100),
             })
 
-    return sorted(matches, key=lambda x: x["proximity"], reverse=True)[:3]
+    random.shuffle(matches)
+    matches.sort(key=lambda x: x["proximity"], reverse=True)
+    return matches[:top_n]
+
+
+# --- 3-DEGREE CONNECTIONS MIND MAP ---
+# Branching: 5 direct (degree 1) + 2 children each (degree 2, 10 nodes)
+#            + 1 child each (degree 3, 10 nodes) = 25 people total
+MINDMAP_BRANCHING = {1: 5, 2: 2, 3: 1}
+
+def build_mindmap(df: pd.DataFrame, head: str, chest: str, tenchu: str) -> dict:
+    nodes = [{
+        "id": "you", "name": "You", "degree": 0, "parent": None,
+        "domain": "", "themes": "", "birthdate": "", "wd_id": "",
+        "head": head, "chest": chest, "tenchu": tenchu, "proximity": 100,
+    }]
+    links = []
+    seen = set()
+    frontier = [("you", head, chest, tenchu)]
+
+    for degree in (1, 2, 3):
+        n_children = MINDMAP_BRANCHING[degree]
+        next_frontier = []
+        for parent_id, p_head, p_chest, p_tenchu in frontier:
+            for m in find_matches(df, p_head, p_chest, p_tenchu, exclude=seen, top_n=n_children):
+                seen.add(m["name"])
+                nodes.append({
+                    "id": m["name"], "name": m["name"], "degree": degree, "parent": parent_id,
+                    "domain": m["domain"], "themes": m["themes"], "birthdate": m["birthdate"],
+                    "wd_id": m["wd_id"],
+                    "head": m["head"], "chest": m["chest"], "tenchu": m["tenchu"],
+                    "proximity": m["proximity"],
+                })
+                links.append({"source": parent_id, "target": m["name"], "proximity": m["proximity"]})
+                next_frontier.append((m["name"], m["head"], m["chest"], m["tenchu"]))
+        frontier = next_frontier
+
+    return {"nodes": nodes, "links": links}
 
 # --- CSV LOOKUP HELPER ---
 def get_meta_text(df, col: str, val: str, target_col: str) -> str:
@@ -242,8 +346,10 @@ async def analyze(dob: BirthDate):
         chest_txt  = get_meta_text(df_10_stars,  "星",  chest_star,  "Core Traits (Corrected)")
         tenchu_txt = get_meta_text(df_tenchu_ref, "Type", tenchusatsu, "Lifelong Traits")
 
-        # 8. Historical proximity match
-        proximity_matches = find_closest_profiles(head_star, chest_star, tenchusatsu)
+        # 8. Historical proximity match + 3-degree connections mind map
+        df_db = load_database()
+        proximity_matches = find_matches(df_db, head_star, chest_star, tenchusatsu, top_n=3)
+        mindmap = build_mindmap(df_db, head_star, chest_star, tenchusatsu)
         top_match_text = (
             f"Aligned life markers with {proximity_matches[0]['name']}: {proximity_matches[0]['themes']}"
             if proximity_matches else "Standalone trajectory."
@@ -301,6 +407,7 @@ async def analyze(dob: BirthDate):
                 }
             },
             "proximity_chart": proximity_matches,
+            "mindmap":         mindmap,
             "ai_synthesis":    response.text
         }
 
