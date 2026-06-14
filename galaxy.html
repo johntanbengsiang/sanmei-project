@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>算命学 · Character Galaxy</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── TOKENS (matches index.html) ─────────────────────────────────── */
+:root{
+  --void:#06060F; --deep:#0B0B18; --card:#10101E; --raised:#17172A;
+  --vi:#7C6FEB;   --vi-dim:rgba(124,111,235,.15); --vi-glow:rgba(124,111,235,.35);
+  --gold:#E8B86D; --gold-dim:rgba(232,184,109,.12);
+  --teal:#4ECDC4; --rose:#FF6B9D;
+  --t1:#F0EEF8; --t2:#9E98BE; --t3:#524E6E;
+  --b1:rgba(124,111,235,.12); --b2:rgba(124,111,235,.35);
+
+  /* Element palette — bold, distinct, readable on dark */
+  --wood:#4CAF82;  --wood-dim:rgba(76,175,130,.18);
+  --fire:#FF6B6B;  --fire-dim:rgba(255,107,107,.18);
+  --earth:#C8A85A; --earth-dim:rgba(200,168,90,.18);
+  --metal:#A8B8D0; --metal-dim:rgba(168,184,208,.18);
+  --water:#5B9BD5; --water-dim:rgba(91,155,213,.18);
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--void);color:var(--t1);font-family:'Inter',sans-serif}
+
+/* ── STARFIELD ── */
+#stars{position:fixed;inset:0;pointer-events:none;z-index:0}
+.s{position:absolute;border-radius:50%;background:#fff;animation:twk var(--t) ease-in-out infinite alternate;animation-delay:var(--d)}
+@keyframes twk{from{opacity:var(--lo)}to{opacity:var(--hi)}}
+
+/* ── LAYOUT ── */
+#ui{position:fixed;inset:0;z-index:2;display:flex;flex-direction:column;pointer-events:none}
+
+/* ── TOP BAR ── */
+#topbar{
+  display:flex;align-items:center;gap:1.2rem;
+  padding:.85rem 1.4rem;background:rgba(6,6,15,.85);
+  border-bottom:1px solid var(--b1);backdrop-filter:blur(12px);
+  pointer-events:auto;flex-wrap:wrap;
+}
+.tb-title{font-family:'Noto Serif JP',serif;font-size:1.05rem;font-weight:300;letter-spacing:.18em;
+  background:linear-gradient(135deg,#a89cf5,var(--gold));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap}
+.tb-sep{width:1px;height:24px;background:var(--b2);flex-shrink:0}
+#searchBox{
+  background:var(--raised);border:1px solid var(--b1);border-radius:10px;
+  padding:.4rem .75rem;color:var(--t1);font-size:.8rem;width:180px;outline:none;
+  font-family:'Inter',sans-serif;
+}
+#searchBox::placeholder{color:var(--t3)}
+#searchBox:focus{border-color:var(--vi)}
+.filter-row{display:flex;gap:.4rem;flex-wrap:wrap}
+.el-btn{
+  padding:.28rem .7rem;border-radius:8px;border:1px solid transparent;
+  font-size:.68rem;letter-spacing:.06em;cursor:pointer;font-family:'Inter',sans-serif;
+  font-weight:500;transition:all .15s;background:var(--raised);color:var(--t2);
+}
+.el-btn.active,  .el-btn:hover{color:#fff}
+.el-btn[data-el="All"].active   {border-color:var(--vi);background:var(--vi-dim);color:var(--t1)}
+.el-btn[data-el="Wood"].active  {border-color:var(--wood);background:var(--wood-dim);color:var(--wood)}
+.el-btn[data-el="Fire"].active  {border-color:var(--fire);background:var(--fire-dim);color:var(--fire)}
+.el-btn[data-el="Earth"].active {border-color:var(--earth);background:var(--earth-dim);color:var(--earth)}
+.el-btn[data-el="Metal"].active {border-color:var(--metal);background:var(--metal-dim);color:var(--metal)}
+.el-btn[data-el="Water"].active {border-color:var(--water);background:var(--water-dim);color:var(--water)}
+.zoom-controls{display:flex;gap:.3rem;margin-left:auto;flex-shrink:0}
+.zbtn{
+  width:28px;height:28px;border-radius:8px;border:1px solid var(--b2);
+  background:var(--raised);color:var(--t2);font-size:1rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.zbtn:hover{background:var(--b2);color:var(--t1)}
+.back-btn{
+  display:flex;align-items:center;gap:.4rem;padding:.3rem .75rem;
+  border-radius:9px;border:1px solid var(--b1);background:var(--raised);
+  color:var(--t2);font-size:.72rem;cursor:pointer;text-decoration:none;
+  transition:all .15s;white-space:nowrap;
+}
+.back-btn:hover{border-color:var(--vi);color:var(--t1)}
+
+/* ── CANVAS ── */
+#canvas{position:fixed;inset:0;z-index:1;cursor:grab}
+#canvas:active{cursor:grabbing}
+#galaxySvg{width:100%;height:100%}
+
+/* ── CLUSTER LABELS (rendered inside SVG as foreignObject fallback via text) ── */
+.cluster-label{
+  font-family:'Noto Serif JP',serif;
+  pointer-events:none;
+  user-select:none;
+}
+
+/* ── TOOLTIP ── */
+#tooltip{
+  position:fixed;z-index:10;pointer-events:none;
+  background:var(--raised);border:1px solid var(--b2);
+  border-radius:12px;padding:.7rem .9rem;
+  max-width:220px;opacity:0;transition:opacity .12s;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+}
+.tt-name{font-weight:600;color:var(--gold);font-size:.82rem;margin-bottom:.2rem;font-family:'Noto Serif JP',serif}
+.tt-meta{color:var(--t3);font-size:.67rem;margin-bottom:.2rem}
+.tt-arch{font-size:.67rem;margin-bottom:.18rem}
+.tt-hint{color:var(--t3);font-size:.62rem;font-style:italic}
+
+/* ── SIDE PANEL (click detail) ── */
+#sidePanel{
+  position:fixed;right:0;top:0;bottom:0;width:320px;
+  background:rgba(11,11,24,.96);border-left:1px solid var(--b1);
+  transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+  z-index:5;display:flex;flex-direction:column;
+  backdrop-filter:blur(16px);pointer-events:auto;
+}
+#sidePanel.open{transform:translateX(0)}
+#spClose{
+  position:absolute;top:.7rem;right:.75rem;width:28px;height:28px;
+  border-radius:50%;border:none;background:transparent;
+  color:var(--t2);font-size:1.2rem;cursor:pointer;
+}
+#spClose:hover{background:var(--b1);color:var(--t1)}
+#spScroll{flex:1;overflow-y:auto;padding:1.4rem 1.2rem 1.2rem;padding-top:2.8rem}
+.sp-name{font-family:'Noto Serif JP',serif;font-size:1.05rem;font-weight:700;
+  color:var(--gold);margin-bottom:.3rem;padding-right:1.5rem;line-height:1.3}
+.sp-meta{color:var(--t3);font-size:.72rem;margin-bottom:.25rem;line-height:1.5}
+.sp-stars{font-family:'Noto Serif JP',serif;font-size:.72rem;color:var(--vi);margin-bottom:.6rem}
+.sp-arch-pill{
+  display:inline-flex;align-items:center;gap:.35rem;
+  padding:.22rem .7rem;border-radius:20px;border:1px solid;
+  font-size:.67rem;margin-bottom:.75rem;
+}
+.sp-wiki-row{display:flex;align-items:flex-start;gap:.8rem;margin:.5rem 0 .7rem}
+.sp-img-wrap{flex-shrink:0;width:72px;height:72px;border-radius:10px;
+  overflow:hidden;border:1px solid var(--b1);background:var(--card)}
+.sp-img{width:100%;height:100%;object-fit:cover;display:block}
+.sp-img-shimmer{width:100%;height:100%;
+  background:linear-gradient(90deg,var(--card) 25%,var(--raised) 50%,var(--card) 75%);
+  background-size:200% 100%;animation:shimmer 1.3s infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.sp-img-fallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+  font-size:1.6rem;font-weight:700;color:var(--t3);font-family:'Noto Serif JP',serif}
+.sp-wiki-link{
+  display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--vi);
+  text-decoration:none;border:1px solid var(--b1);border-radius:8px;
+  padding:.3rem .65rem;margin-top:.2rem;transition:background .15s;
+}
+.sp-wiki-link:hover{background:var(--vi-dim);color:var(--t1)}
+.sp-themes{color:var(--t2);font-size:.77rem;line-height:1.75;margin-top:.5rem}
+.sp-divider{width:100%;height:1px;background:var(--b1);margin:.8rem 0}
+
+/* ── STATUS BAR ── */
+#statusBar{
+  position:fixed;bottom:0;left:0;right:0;z-index:3;
+  padding:.4rem 1.2rem;background:rgba(6,6,15,.75);
+  border-top:1px solid var(--b1);backdrop-filter:blur(8px);
+  display:flex;align-items:center;gap:1rem;pointer-events:none;
+}
+#statusText{font-size:.68rem;color:var(--t3)}
+#clusterInfo{font-size:.68rem;color:var(--t2);margin-left:auto}
+
+/* ── LEGEND ── */
+#legend{
+  position:fixed;left:1rem;bottom:2.4rem;z-index:3;
+  display:flex;flex-direction:column;gap:.3rem;pointer-events:none;
+}
+.leg-row{display:flex;align-items:center;gap:.5rem;font-size:.64rem;color:var(--t3)}
+.leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- Starfield -->
+<div id="stars"></div>
+
+<!-- Canvas -->
+<div id="canvas"><svg id="galaxySvg"></svg></div>
+
+<!-- UI overlay -->
+<div id="ui">
+  <div id="topbar">
+    <a href="index.html" class="back-btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Chart
+    </a>
+    <div class="tb-sep"></div>
+    <span class="tb-title">性格銀河 · Character Galaxy</span>
+    <div class="tb-sep"></div>
+    <input id="searchBox" placeholder="Search name…" autocomplete="off" spellcheck="false">
+    <div class="filter-row">
+      <button class="el-btn active" data-el="All">All</button>
+      <button class="el-btn" data-el="Wood">木 Wood</button>
+      <button class="el-btn" data-el="Fire">火 Fire</button>
+      <button class="el-btn" data-el="Earth">土 Earth</button>
+      <button class="el-btn" data-el="Metal">金 Metal</button>
+      <button class="el-btn" data-el="Water">水 Water</button>
+    </div>
+    <div class="zoom-controls">
+      <button class="zbtn" id="zIn">+</button>
+      <button class="zbtn" id="zOut">−</button>
+      <button class="zbtn" id="zReset" style="font-size:.7rem">⌂</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip">
+  <div class="tt-name" id="ttName"></div>
+  <div class="tt-meta" id="ttMeta"></div>
+  <div class="tt-arch" id="ttArch"></div>
+  <div class="tt-hint">Click for full profile</div>
+</div>
+
+<!-- Side panel -->
+<div id="sidePanel">
+  <button id="spClose">&times;</button>
+  <div id="spScroll">
+    <div class="sp-name" id="spName"></div>
+    <div class="sp-meta" id="spMeta"></div>
+    <div class="sp-stars" id="spStars"></div>
+    <div class="sp-arch-pill" id="spPill"></div>
+    <div class="sp-wiki-row">
+      <div class="sp-img-wrap"><div id="spImgWrap"><div class="sp-img-shimmer"></div></div></div>
+      <div><div id="spWikiLink"></div></div>
+    </div>
+    <div class="sp-divider"></div>
+    <div class="sp-themes" id="spThemes"></div>
+  </div>
+</div>
+
+<!-- Status + legend -->
+<div id="statusBar">
+  <div id="statusText">Loading galaxy…</div>
+  <div id="clusterInfo"></div>
+</div>
+<div id="legend">
+  <div class="leg-row"><div class="leg-dot" style="background:var(--wood)"></div>Wood · Growth</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--fire)"></div>Fire · Expression</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--earth)"></div>Earth · Stability</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--metal)"></div>Metal · Structure</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--water)"></div>Water · Depth</div>
+</div>
+
+<script>
+/* ── CONFIG ────────────────────────────────────────────────────────── */
+const API_BASE = 'https://sanmei-backend.onrender.com';  // update to match your backend
+
+const EL_COLOR = {
+  Wood:'#4CAF82', Fire:'#FF6B6B', Earth:'#C8A85A', Metal:'#A8B8D0', Water:'#5B9BD5', '?':'#524E6E'
+};
+const EL_GLYPH = {Wood:'木', Fire:'火', Earth:'土', Metal:'金', Water:'水'};
+
+// 5×5 grid of cluster anchor points in a 3000×3000 virtual canvas
+// Rows = Head element, Cols = Chest element, ordered Wood/Fire/Earth/Metal/Water
+const ELEMENTS = ['Wood','Fire','Earth','Metal','Water'];
+const GRID_W = 3000, GRID_H = 3000;
+const CELL_W = GRID_W / 5, CELL_H = GRID_H / 5;
+
+function clusterAnchor(arch) {
+  const [headEl, chestEl] = arch.split('/');
+  const row = ELEMENTS.indexOf(headEl);
+  const col = ELEMENTS.indexOf(chestEl);
+  if (row < 0 || col < 0) return {x: GRID_W/2, y: GRID_H/2};
+  return {
+    x: col * CELL_W + CELL_W / 2,
+    y: row * CELL_H + CELL_H / 2,
+  };
+}
+
+/* ── STARFIELD ─────────────────────────────────────────────────────── */
+(function(){
+  const c = document.getElementById('stars');
+  for(let i=0;i<120;i++){
+    const s=document.createElement('div'); s.className='s';
+    const sz=Math.random()*1.8+.3;
+    s.style.cssText=`width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;--t:${2+Math.random()*4}s;--d:${Math.random()*4}s;--lo:${.05+Math.random()*.2};--hi:${.4+Math.random()*.5}`;
+    c.appendChild(s);
+  }
+})();
+
+/* ── DATA ──────────────────────────────────────────────────────────── */
+let allNodes = [], allLinks = [], archetypesMeta = {};
+let simulation = null, zoomBehaviour = null;
+let activeEl = 'All', searchQuery = '';
+let selectedNode = null;
+
+async function loadData() {
+  try {
+    const res = await fetch(`${API_BASE}/api/galaxy`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    allNodes = data.nodes || [];
+    allLinks = data.links || [];
+    archetypesMeta = data.archetypes || {};
+    document.getElementById('statusText').textContent =
+      `${allNodes.length} people across ${Object.keys(archetypesMeta).length} archetypes`;
+    buildGalaxy();
+  } catch(e) {
+    document.getElementById('statusText').textContent = `Error loading data: ${e.message}`;
+  }
+}
+
+/* ── GALAXY RENDER ─────────────────────────────────────────────────── */
+function buildGalaxy() {
+  const svg = d3.select('#galaxySvg');
+  svg.selectAll('*').remove();
+
+  // Zoom
+  zoomBehaviour = d3.zoom()
+    .scaleExtent([0.05, 4])
+    .on('zoom', e => root.attr('transform', e.transform));
+  svg.call(zoomBehaviour).on('dblclick.zoom', null);
+  svg.call(zoomBehaviour.transform, d3.zoomIdentity
+    .translate(window.innerWidth/2 - GRID_W*0.18, window.innerHeight/2 - GRID_H*0.18)
+    .scale(0.35));
+
+  document.getElementById('zIn').onclick    = () => svg.transition().duration(250).call(zoomBehaviour.scaleBy, 1.4);
+  document.getElementById('zOut').onclick   = () => svg.transition().duration(250).call(zoomBehaviour.scaleBy, 1/1.4);
+  document.getElementById('zReset').onclick = () => svg.transition().duration(400).call(
+    zoomBehaviour.transform,
+    d3.zoomIdentity.translate(window.innerWidth/2 - GRID_W*0.18, window.innerHeight/2 - GRID_H*0.18).scale(0.35)
+  );
+
+  const defs = svg.append('defs');
+  // Glow filter per element colour
+  Object.entries(EL_COLOR).forEach(([el, col]) => {
+    if (el === '?') return;
+    const f = defs.append('filter').attr('id',`glow-${el}`);
+    f.append('feGaussianBlur').attr('stdDeviation','3').attr('result','blur');
+    const m = f.append('feMerge');
+    m.append('feMergeNode').attr('in','blur');
+    m.append('feMergeNode').attr('in','SourceGraphic');
+  });
+
+  const root = svg.append('g').attr('id','root');
+
+  // ── Grid section dividers ──────────────────────────────────────────
+  const gridG = root.append('g').attr('id','gridLines');
+
+  // Column and row lines
+  for(let i=1;i<5;i++){
+    gridG.append('line')
+      .attr('x1', i*CELL_W).attr('y1',0).attr('x2',i*CELL_W).attr('y2',GRID_H)
+      .attr('stroke','rgba(124,111,235,0.04)').attr('stroke-width',1);
+    gridG.append('line')
+      .attr('x1',0).attr('y1', i*CELL_H).attr('x2',GRID_W).attr('y2',i*CELL_H)
+      .attr('stroke','rgba(124,111,235,0.04)').attr('stroke-width',1);
+  }
+
+  // Row and column axis labels (Head element on Y, Chest on X)
+  ELEMENTS.forEach((el,i) => {
+    const col = EL_COLOR[el];
+    // Column header (Chest element)
+    root.append('text')
+      .attr('x', i*CELL_W + CELL_W/2).attr('y', -28)
+      .attr('text-anchor','middle').attr('font-size','22px')
+      .attr('font-family','Noto Serif JP,serif').attr('fill',col).attr('opacity',.55)
+      .text(EL_GLYPH[el]);
+    root.append('text')
+      .attr('x', i*CELL_W + CELL_W/2).attr('y', -8)
+      .attr('text-anchor','middle').attr('font-size','9px').attr('letter-spacing','0.12em')
+      .attr('font-family','Inter,sans-serif').attr('fill',col).attr('opacity',.4)
+      .text(`CHEST · ${el.toUpperCase()}`);
+
+    // Row header (Head element)
+    root.append('text')
+      .attr('x', -20).attr('y', i*CELL_H + CELL_H/2 - 8)
+      .attr('text-anchor','middle').attr('font-size','22px')
+      .attr('font-family','Noto Serif JP,serif').attr('fill',col).attr('opacity',.55)
+      .attr('transform',`rotate(-90, -20, ${i*CELL_H + CELL_H/2 - 8})`)
+      .text(EL_GLYPH[el]);
+    root.append('text')
+      .attr('x', -48).attr('y', i*CELL_H + CELL_H/2 + 5)
+      .attr('text-anchor','middle').attr('font-size','8px').attr('letter-spacing','0.1em')
+      .attr('font-family','Inter,sans-serif').attr('fill',col).attr('opacity',.4)
+      .attr('transform',`rotate(-90, -48, ${i*CELL_H + CELL_H/2 + 5})`)
+      .text(`HEAD · ${el.toUpperCase()}`);
+  });
+
+  // Cluster background blobs + labels
+  const clusterG = root.append('g').attr('id','clusters');
+  Object.entries(archetypesMeta).forEach(([arch, meta]) => {
+    const anchor = clusterAnchor(arch);
+    const [headEl, chestEl] = arch.split('/');
+    const col = EL_COLOR[headEl] || '#524E6E';
+    const r = Math.sqrt(meta.count) * 14 + 20;
+
+    // Soft background circle
+    clusterG.append('circle')
+      .attr('cx', anchor.x).attr('cy', anchor.y).attr('r', r)
+      .attr('fill', col).attr('opacity', 0.035);
+
+    // Cluster archetype label
+    clusterG.append('text')
+      .attr('x', anchor.x).attr('y', anchor.y - r - 10)
+      .attr('text-anchor','middle').attr('font-size','11px')
+      .attr('font-family','Noto Serif JP,serif').attr('fill', col).attr('opacity', .6)
+      .attr('class','cluster-label').attr('data-arch', arch)
+      .text(arch.replace('/', ' ▸ '));
+
+    clusterG.append('text')
+      .attr('x', anchor.x).attr('y', anchor.y - r + 2)
+      .attr('text-anchor','middle').attr('font-size','8px')
+      .attr('font-family','Inter,sans-serif').attr('fill', col).attr('opacity', .35)
+      .attr('class','cluster-label').attr('data-arch', arch)
+      .text(`${meta.count} people`);
+  });
+
+  // ── Force simulation ───────────────────────────────────────────────
+  // Initialise node positions to their cluster anchor so the initial layout is already grouped
+  const nodeData = allNodes.map(n => {
+    const anchor = clusterAnchor(n.archetype);
+    return {
+      ...n,
+      x: anchor.x + (Math.random() - .5) * 60,
+      y: anchor.y + (Math.random() - .5) * 60,
+      _anchor: anchor,
+    };
+  });
+  const nodeById = new Map(nodeData.map(n => [n.id, n]));
+
+  const linkData = allLinks
+    .map(l => ({ source: nodeById.get(l.source), target: nodeById.get(l.target), archetype: l.archetype }))
+    .filter(l => l.source && l.target);
+
+  simulation = d3.forceSimulation(nodeData)
+    .force('link', d3.forceLink(linkData).id(d=>d.id).distance(18).strength(.08))
+    .force('charge', d3.forceManyBody().strength(-12).distanceMax(120))
+    .force('collide', d3.forceCollide(6))
+    // Strong pull back to cluster anchor — this is what keeps them grouped
+    .force('clusterX', d3.forceX(d => d._anchor.x).strength(.35))
+    .force('clusterY', d3.forceY(d => d._anchor.y).strength(.35))
+    .alphaDecay(0.025)
+    .on('tick', ticked);
+
+  // Links
+  const linkSel = root.append('g').attr('id','links')
+    .selectAll('line').data(linkData).enter().append('line')
+    .attr('stroke', d => EL_COLOR[d.archetype?.split('/')[0]] || '#524E6E')
+    .attr('stroke-width', .6)
+    .attr('opacity', .12);
+
+  // Nodes
+  const nodeG = root.append('g').attr('id','nodes')
+    .selectAll('g').data(nodeData).enter().append('g')
+    .attr('class','node-g')
+    .style('cursor','pointer');
+
+  nodeG.append('circle')
+    .attr('r', 5)
+    .attr('fill', d => EL_COLOR[d.head_el] || '#524E6E')
+    .attr('opacity', .85)
+    .attr('filter', d => `url(#glow-${d.head_el})`);
+
+  // Chest element ring (outer)
+  nodeG.append('circle')
+    .attr('r', 5)
+    .attr('fill', 'none')
+    .attr('stroke', d => EL_COLOR[d.chest_el] || '#524E6E')
+    .attr('stroke-width', 1.5)
+    .attr('opacity', .55);
+
+  function ticked() {
+    linkSel
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeG.attr('transform', d => `translate(${d.x},${d.y})`);
+  }
+
+  // ── Interactions ───────────────────────────────────────────────────
+  const tooltip = document.getElementById('tooltip');
+
+  nodeG
+    .on('mouseover', function(event, d) {
+      if(activeEl !== 'All' && d.head_el !== activeEl && d.chest_el !== activeEl) return;
+      d3.select(this).select('circle:first-child').attr('r', 8).attr('opacity', 1);
+      document.getElementById('ttName').textContent = d.name;
+      document.getElementById('ttMeta').textContent =
+        [d.domain, d.birthdate ? 'b. '+d.birthdate : ''].filter(Boolean).join(' · ');
+      document.getElementById('ttArch').innerHTML =
+        `<span style="color:${EL_COLOR[d.head_el]}">${d.head_el}</span>`+
+        ` <span style="color:var(--t3)">▸</span> `+
+        `<span style="color:${EL_COLOR[d.chest_el]}">${d.chest_el}</span>`+
+        ` <span style="color:var(--t3);font-size:.62rem">· ${d.head} / ${d.chest}</span>`;
+      tooltip.style.opacity = '1';
+      positionTooltip(event);
+    })
+    .on('mousemove', positionTooltip)
+    .on('mouseout', function(event, d) {
+      if (d !== selectedNode)
+        d3.select(this).select('circle:first-child').attr('r', 5).attr('opacity', .85);
+      tooltip.style.opacity = '0';
+    })
+    .on('click', function(event, d) {
+      event.stopPropagation();
+      selectedNode = d;
+      openPanel(d);
+      nodeG.select('circle:first-child').attr('r', 5).attr('opacity', .85);
+      d3.select(this).select('circle:first-child').attr('r', 9).attr('opacity', 1);
+    });
+
+  svg.on('click', () => { closePanel(); selectedNode = null; });
+
+  // Store refs for filter/search updates
+  window._galaxyNodeSel = nodeG;
+  window._galaxyLinkSel = linkSel;
+  window._galaxyClusterSel = clusterG;
+  window._galaxyNodeData = nodeData;
+}
+
+function positionTooltip(event) {
+  const tp = document.getElementById('tooltip');
+  const x = event.clientX, y = event.clientY;
+  const tw = 220, th = 90;
+  tp.style.left = (x + 14 + tw > window.innerWidth ? x - tw - 10 : x + 14) + 'px';
+  tp.style.top  = (y + th > window.innerHeight ? y - th : y + 10) + 'px';
+}
+
+/* ── FILTER & SEARCH ──────────────────────────────────────────────── */
+function applyFilter() {
+  const q = searchQuery.toLowerCase().trim();
+  const el = activeEl;
+
+  if (!window._galaxyNodeSel) return;
+
+  window._galaxyNodeSel.attr('opacity', d => {
+    const elMatch = el === 'All' || d.head_el === el || d.chest_el === el;
+    const qMatch  = !q || d.name.toLowerCase().includes(q)
+                       || (d.domain||'').toLowerCase().includes(q);
+    return (elMatch && qMatch) ? 1 : 0.04;
+  });
+
+  window._galaxyLinkSel.attr('opacity', d => {
+    const [he, ce] = d.archetype ? d.archetype.split('/') : ['?','?'];
+    return (el === 'All' || he === el || ce === el) ? 0.12 : 0.02;
+  });
+
+  // Highlight cluster labels
+  d3.selectAll('.cluster-label').attr('opacity', function() {
+    const arch = this.getAttribute('data-arch');
+    if (!arch) return null;
+    const [he] = arch.split('/');
+    return (el === 'All' || he === el) ? null : 0.1;
+  });
+
+  // Update status
+  const visible = window._galaxyNodeData
+    ? window._galaxyNodeData.filter(d => {
+        const elMatch = el === 'All' || d.head_el === el || d.chest_el === el;
+        const qMatch  = !q || d.name.toLowerCase().includes(q) || (d.domain||'').toLowerCase().includes(q);
+        return elMatch && qMatch;
+      }).length
+    : '?';
+
+  document.getElementById('statusText').textContent =
+    `Showing ${visible} of ${allNodes.length} people`;
+  document.getElementById('clusterInfo').textContent =
+    el !== 'All' ? `Filter: ${EL_GLYPH[el]||''} ${el} element` : '';
+}
+
+document.querySelectorAll('.el-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.el-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeEl = btn.dataset.el;
+    applyFilter();
+  });
+});
+
+document.getElementById('searchBox').addEventListener('input', e => {
+  searchQuery = e.target.value;
+  applyFilter();
+});
+
+/* ── SIDE PANEL ────────────────────────────────────────────────────── */
+function openPanel(d) {
+  const headCol  = EL_COLOR[d.head_el]  || '#524E6E';
+  const chestCol = EL_COLOR[d.chest_el] || '#524E6E';
+
+  document.getElementById('spName').textContent = d.name;
+  document.getElementById('spMeta').textContent =
+    [d.domain, d.birthdate ? 'b. ' + d.birthdate : ''].filter(Boolean).join(' · ');
+  document.getElementById('spStars').textContent =
+    `頭 ${d.head || '—'} · 胸 ${d.chest || '—'} · 天中殺 ${d.tenchu || '—'}`;
+
+  const pill = document.getElementById('spPill');
+  pill.style.borderColor = headCol;
+  pill.style.color = headCol;
+  pill.innerHTML =
+    `<span style="color:${headCol}">${d.head_el}</span>`+
+    `<span style="color:var(--t3)"> ▸ </span>`+
+    `<span style="color:${chestCol}">${d.chest_el}</span>`+
+    `<span style="color:var(--t3);font-weight:300"> · ${archetypesMeta[d.archetype]?.description || ''}</span>`;
+
+  document.getElementById('spThemes').textContent =
+    d.themes && !d.themes.includes('[auto-placeholder')
+      ? d.themes
+      : 'Profile enrichment pending.';
+
+  // Shimmer while fetching wiki
+  document.getElementById('spImgWrap').innerHTML = '<div class="sp-img-shimmer"></div>';
+  document.getElementById('spWikiLink').innerHTML = '';
+
+  document.getElementById('sidePanel').classList.add('open');
+
+  // Async wiki fetch
+  fetchWiki(d.wd_id, d.name).then(wiki => {
+    const iw = document.getElementById('spImgWrap');
+    const wl = document.getElementById('spWikiLink');
+    if (!iw) return;
+    iw.innerHTML = wiki?.thumb
+      ? `<img class="sp-img" src="${wiki.thumb}" alt="${d.name}" loading="lazy">`
+      : `<div class="sp-img-fallback">${d.name.charAt(0)}</div>`;
+    if (wiki?.pageUrl && wl) {
+      wl.innerHTML = `<a class="sp-wiki-link" href="${wiki.pageUrl}" target="_blank" rel="noopener">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Wikipedia
+      </a>`;
+    }
+  });
+}
+
+function closePanel() {
+  document.getElementById('sidePanel').classList.remove('open');
+}
+
+document.getElementById('spClose').addEventListener('click', closePanel);
+
+/* ── WIKIPEDIA FETCH (same logic as index.html) ────────────────────── */
+async function fetchWiki(wdId, name) {
+  if (!wdId || wdId === 'nan' || wdId === '') return fetchWikiByTitle(name);
+  try {
+    const wdRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(wdId)}&props=sitelinks&sitefilter=enwiki&format=json&origin=*`);
+    const wdData = await wdRes.json();
+    const title = wdData.entities?.[wdId]?.sitelinks?.enwiki?.title;
+    return title ? fetchWikiByTitle(title) : fetchWikiByTitle(name);
+  } catch(e) { return fetchWikiByTitle(name); }
+}
+
+async function fetchWikiByTitle(title) {
+  try {
+    const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    return { thumb: d.thumbnail?.source || null, pageUrl: d.content_urls?.desktop?.page || null };
+  } catch(e) { return null; }
+}
+
+/* ── BOOT ──────────────────────────────────────────────────────────── */
+loadData();
+</script>
+</body>
+</html>
