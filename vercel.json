@@ -1,9 +1,11 @@
 {
   "version": 2,
   "builds": [
-    { "src": "index.html", "use": "@vercel/static" }
+    { "src": "index.html",  "use": "@vercel/static" },
+    { "src": "galaxy.html", "use": "@vercel/static" }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/galaxy.html", "dest": "/galaxy.html" },
+    { "src": "/(.*)",        "dest": "/index.html"  }
   ]
 }
