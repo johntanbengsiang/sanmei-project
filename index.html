@@ -303,13 +303,25 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     border-radius:22px;padding:1.8rem;overflow:hidden;position:relative;
 }
 #proxViz{width:100%;aspect-ratio:1/1;position:relative}
-#proxSvg{width:100%;height:100%}
+#proxSvg{width:100%;height:100%;cursor:grab}
+#proxSvg:active{cursor:grabbing}
 .prox-legend{
     display:flex;gap:1.8rem;justify-content:center;
     margin-top:1rem;flex-wrap:wrap
 }
 .leg{display:flex;align-items:center;gap:.45rem;font-size:.65rem;color:var(--t3);letter-spacing:.1em}
 .leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.zoom-controls{
+    position:absolute;top:.6rem;right:.6rem;
+    display:flex;flex-direction:column;gap:.3rem;z-index:10;
+}
+.zoom-btn{
+    width:28px;height:28px;border-radius:8px;border:1px solid var(--b2);
+    background:var(--raised);color:var(--t2);font-size:1rem;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;
+    transition:background .15s,color .15s;user-select:none;
+}
+.zoom-btn:hover{background:var(--ink);color:var(--t1)}
 
 /* Node detail modal (replaces the old hover tooltip — works on tap,
    scrolls, never gets cropped since it's fixed to the viewport) */
@@ -489,6 +501,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="prox-card">
             <div id="proxViz">
                 <svg id="proxSvg"></svg>
+                <div class="zoom-controls">
+                    <button class="zoom-btn" id="zmIn"  title="Zoom in">+</button>
+                    <button class="zoom-btn" id="zmOut" title="Zoom out">−</button>
+                    <button class="zoom-btn" id="zmReset" title="Reset view" style="font-size:.7rem">⌂</button>
+                </div>
             </div>
             <div class="prox-legend">
                 <div class="leg"><div class="leg-dot" style="background:var(--gold)"></div>You</div>
@@ -665,6 +682,29 @@ function buildMindMap(graph, inputDate){
     const W=660, H=660, cx=W/2, cy=H/2;
     svg.attr('viewBox',`0 0 ${W} ${H}`);
 
+    // ── ZOOM BEHAVIOUR ──────────────────────────────────────────────────
+    // All drawn content lives inside this single group so pan/zoom works.
+    const zoom = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .on('zoom', e => zoomLayer.attr('transform', e.transform));
+
+    svg.call(zoom).on('dblclick.zoom', null); // disable dbl-click zoom
+
+    const zoomLayer = svg.append('g').attr('id','zoomLayer');
+
+    // Button wiring (safe: buttons may not exist in older renders)
+    const btnIn    = document.getElementById('zmIn');
+    const btnOut   = document.getElementById('zmOut');
+    const btnReset = document.getElementById('zmReset');
+
+    const stepZoom = (factor) => svg.transition().duration(250).call(zoom.scaleBy, factor);
+    const resetZoom = () => svg.transition().duration(350).call(zoom.transform, d3.zoomIdentity);
+
+    if(btnIn)    { btnIn.onclick    = () => stepZoom(1.35); }
+    if(btnOut)   { btnOut.onclick   = () => stepZoom(1/1.35); }
+    if(btnReset) { btnReset.onclick = resetZoom; }
+    // ────────────────────────────────────────────────────────────────────
+
     const byId=new Map(nodes.map(n=>[n.id,n]));
     const childrenOf=new Map();
     links.forEach(l=>{
@@ -695,12 +735,12 @@ function buildMindMap(graph, inputDate){
     nodes.forEach(n=>{
         if(n.id==='you'){ n.x=cx; n.y=cy; return; }
         const a=angle.get(n.id)||0;
-        const r=DEGREE_RADIUS[n.degree]||188;
+        const r=DEGREE_RADIUS[n.degree]||255;
         n.x=cx+Math.cos(a)*r;
         n.y=cy+Math.sin(a)*r;
     });
 
-    // Defs / glow
+    // Defs / glow (attached to svg, not zoomLayer — filters are global)
     const defs=svg.append('defs');
     const filt=defs.append('filter').attr('id','glow');
     filt.append('feGaussianBlur').attr('stdDeviation','4').attr('result','blur');
@@ -708,26 +748,26 @@ function buildMindMap(graph, inputDate){
     fm.append('feMergeNode').attr('in','blur');
     fm.append('feMergeNode').attr('in','SourceGraphic');
 
-    // Orbit rings (one per degree)
+    // Orbit rings
     Object.values(DEGREE_RADIUS).forEach(r=>{
-        svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r)
+        zoomLayer.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r)
             .attr('fill','none').attr('stroke','rgba(124,111,235,0.07)')
             .attr('stroke-dasharray','3 6');
     });
 
-    // Links (color/opacity fade with degree)
+    // Links
     links.forEach((l,i)=>{
         const s=byId.get(l.source), t=byId.get(l.target);
         if(!s||!t) return;
         const op={1:.85,2:.55,3:.35}[t.degree]||.3;
-        svg.append('line')
+        zoomLayer.append('line')
             .attr('x1',s.x).attr('y1',s.y).attr('x2',t.x).attr('y2',t.y)
             .attr('stroke',DEGREE_COLOR[t.degree]||'#4ECDC4')
             .attr('stroke-width',1.3).attr('stroke-dasharray','4 4')
             .attr('opacity',0)
             .transition().duration(700).delay(150+i*40).attr('opacity',op);
 
-        svg.append('text')
+        zoomLayer.append('text')
             .attr('x',(s.x+t.x)/2).attr('y',(s.y+t.y)/2-4)
             .attr('text-anchor','middle').attr('font-size','7px')
             .attr('fill',DEGREE_COLOR[t.degree]).attr('opacity',0)
@@ -736,7 +776,7 @@ function buildMindMap(graph, inputDate){
     });
 
     // Nodes
-    const ng=svg.selectAll('.nd').data(nodes).enter().append('g')
+    const ng=zoomLayer.selectAll('.nd').data(nodes).enter().append('g')
         .attr('class','nd')
         .attr('transform',d=>`translate(${d.x},${d.y})`);
 
@@ -756,7 +796,7 @@ function buildMindMap(graph, inputDate){
         .text('★')
         .transition().duration(500).delay(80).attr('opacity',1);
 
-    // % labels inside degree 1/2 nodes (degree 3 too small to hold text)
+    // % labels inside degree 1/2 nodes
     ng.filter(d=>d.degree===1||d.degree===2).append('text')
         .attr('text-anchor','middle').attr('dy','.35em')
         .attr('font-size',d=>d.degree===1?'8px':'6.5px')
@@ -764,7 +804,7 @@ function buildMindMap(graph, inputDate){
         .text(d=>`${d.proximity}%`)
         .transition().duration(500).delay((d,i)=>i*55+200).attr('opacity',.95);
 
-    // Name labels (full for you/degree-1, truncated for deeper degrees)
+    // Name labels
     ng.append('text')
         .attr('text-anchor','middle')
         .attr('dy',d=>(DEGREE_SIZE[d.degree]||7)+12)
@@ -774,14 +814,13 @@ function buildMindMap(graph, inputDate){
         .text(d=>d.degree<=1?d.name:truncateName(d.name,11))
         .transition().duration(500).delay((d,i)=>i*55+250).attr('opacity',1);
 
-    // Click any non-"you" node -> detail modal. Hover = gentle highlight only
-    // (so this also works correctly on touch, where hover never fires).
+    // Click -> modal, hover -> highlight
     ng.filter(d=>d.degree>0).style('cursor','pointer')
-        .on('click',(event,d)=>openNodeModal(d))
+        .on('click',(event,d)=>{ event.stopPropagation(); openNodeModal(d); })
         .on('mouseover',function(){
             d3.select(this).select('circle:nth-child(2)').transition().duration(120).attr('opacity',1);
         })
-        .on('mouseout',function(event,d){
+        .on('mouseout',function(){
             d3.select(this).select('circle:nth-child(2)').transition().duration(120).attr('opacity',.8);
         });
 }
