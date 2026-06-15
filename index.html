@@ -671,17 +671,22 @@ function showMeta(pos){
     }
 }
 
-/* ── MIND MAP D3 (3 degrees of connection, up to 25 people) ── */
-const DEGREE_COLOR  = {0:'#E8B86D', 1:'#7C6FEB', 2:'#4ECDC4', 3:'#FF6B9D'};
-const DEGREE_RADIUS = {1:90, 2:175, 3:255};
-const DEGREE_SIZE   = {0:22, 1:14, 2:10, 3:7};
-const DEGREE_LABEL  = {1:'Degree 1 · Closest Parallel', 2:'Degree 2 Connection', 3:'Degree 3 Connection'};
+/* ── MIND MAP — NEBULA FORCE SIMULATION ── */
+// Degree colour: You=gold, 1=violet, 2=teal, 3=rose
+const DEGREE_COLOR = {0:'#E8B86D', 1:'#7C6FEB', 2:'#4ECDC4', 3:'#FF6B9D'};
+const DEGREE_SIZE  = {0:20, 1:13, 2:9, 3:6};
+const DEGREE_LABEL = {1:'Degree 1 · Closest Parallel', 2:'Degree 2 Connection', 3:'Degree 3 Connection'};
 
 function truncateName(name, n){
-    return name && name.length > n ? name.slice(0, n - 1) + '…' : (name || '');
+    return name && name.length > n ? name.slice(0, n-1)+'…' : (name||'');
 }
 
+// Keep the active simulation so we can stop it on rebuild
+let _mmSim = null;
+
 function buildMindMap(graph, inputDate){
+    if(_mmSim){ _mmSim.stop(); _mmSim=null; }
+
     const svg=d3.select('#proxSvg');
     svg.selectAll('*').remove();
 
@@ -692,148 +697,198 @@ function buildMindMap(graph, inputDate){
     const W=660, H=660, cx=W/2, cy=H/2;
     svg.attr('viewBox',`0 0 ${W} ${H}`);
 
-    // ── ZOOM BEHAVIOUR ──────────────────────────────────────────────────
-    // All drawn content lives inside this single group so pan/zoom works.
-    const zoom = d3.zoom()
-        .scaleExtent([0.3, 4])
-        .on('zoom', e => zoomLayer.attr('transform', e.transform));
-
-    svg.call(zoom).on('dblclick.zoom', null); // disable dbl-click zoom
-
+    // ── ZOOM ──────────────────────────────────────────────────────────
     const zoomLayer = svg.append('g').attr('id','zoomLayer');
+    const zoom = d3.zoom().scaleExtent([0.25,5])
+        .on('zoom', e => zoomLayer.attr('transform', e.transform));
+    svg.call(zoom).on('dblclick.zoom', null);
+    const btnIn=document.getElementById('zmIn'), btnOut=document.getElementById('zmOut'), btnReset=document.getElementById('zmReset');
+    if(btnIn)    btnIn.onclick    = ()=>svg.transition().duration(250).call(zoom.scaleBy,1.35);
+    if(btnOut)   btnOut.onclick   = ()=>svg.transition().duration(250).call(zoom.scaleBy,1/1.35);
+    if(btnReset) btnReset.onclick = ()=>svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity);
+    // ──────────────────────────────────────────────────────────────────
 
-    // Button wiring (safe: buttons may not exist in older renders)
-    const btnIn    = document.getElementById('zmIn');
-    const btnOut   = document.getElementById('zmOut');
-    const btnReset = document.getElementById('zmReset');
+    // Glow filter
+    const defs=svg.append('defs');
+    ['#E8B86D','#7C6FEB','#4ECDC4','#FF6B9D'].forEach((col,i)=>{
+        const f=defs.append('filter').attr('id',`mg${i}`);
+        f.append('feGaussianBlur').attr('stdDeviation','5').attr('result','b');
+        const m=f.append('feMerge');
+        m.append('feMergeNode').attr('in','b');
+        m.append('feMergeNode').attr('in','SourceGraphic');
+    });
+    const GLOW_ID={0:'mg0',1:'mg1',2:'mg2',3:'mg3'};
 
-    const stepZoom = (factor) => svg.transition().duration(250).call(zoom.scaleBy, factor);
-    const resetZoom = () => svg.transition().duration(350).call(zoom.transform, d3.zoomIdentity);
+    // ── NEBULA BACKGROUND BLOBS ────────────────────────────────────────
+    // One ambient glow per archetype, positioned at the centroid of its
+    // members so the "constellation" look emerges organically.
+    const archetypeNodes={};
+    nodes.forEach(n=>{
+        if(n.degree===0) return;
+        const k=`${n.head_el||'?'}/${n.chest_el||'?'}`;
+        (archetypeNodes[k]=archetypeNodes[k]||[]).push(n);
+    });
+    const nebulaG=zoomLayer.append('g').attr('id','nebulae');
+    Object.entries(archetypeNodes).forEach(([arch,members])=>{
+        // Centroid initialised to the rough D1/D2/D3 spread — updated after sim settles
+        const col=DEGREE_COLOR[members[0].degree]||'#7C6FEB';
+        nebulaG.append('circle')
+            .attr('class','nebula-blob').attr('data-arch',arch)
+            .attr('cx',cx).attr('cy',cy)
+            .attr('r',Math.sqrt(members.length)*28)
+            .attr('fill',col).attr('opacity',0.04);
+    });
 
-    if(btnIn)    { btnIn.onclick    = () => stepZoom(1.35); }
-    if(btnOut)   { btnOut.onclick   = () => stepZoom(1/1.35); }
-    if(btnReset) { btnReset.onclick = resetZoom; }
-    // ────────────────────────────────────────────────────────────────────
+    // ── FORCE SIMULATION ───────────────────────────────────────────────
+    // Key idea: nodes repel each other but are pulled toward their
+    // "archetype centroid" — same head+chest element pair cluster together
+    // naturally. No rigid rings at all.
+
+    // Archetype centroids scattered around cx,cy at varied angles
+    const archetypeKeys=Object.keys(archetypeNodes);
+    const centroid={};
+    archetypeKeys.forEach((k,i)=>{
+        const a=(i/archetypeKeys.length)*Math.PI*2;
+        const r=120+Math.random()*60;
+        centroid[k]={ x:cx+Math.cos(a)*r, y:cy+Math.sin(a)*r };
+    });
+
+    // Initialise positions: "you" at centre, others scattered
+    nodes.forEach(n=>{
+        if(n.degree===0){ n.x=cx; n.y=cy; n.fx=cx; n.fy=cy; return; }
+        const k=`${n.head_el||'?'}/${n.chest_el||'?'}`;
+        const c2=centroid[k]||{x:cx,y:cy};
+        const angle=Math.random()*Math.PI*2;
+        const r=n.degree*60+Math.random()*40;
+        n.x=c2.x+Math.cos(angle)*r;
+        n.y=c2.y+Math.sin(angle)*r;
+    });
 
     const byId=new Map(nodes.map(n=>[n.id,n]));
-    const childrenOf=new Map();
-    links.forEach(l=>{
-        if(!childrenOf.has(l.source)) childrenOf.set(l.source,[]);
-        childrenOf.get(l.source).push(l.target);
-    });
+    const linkData=links.map(l=>({
+        source:byId.get(typeof l.source==='object'?l.source.id:l.source),
+        target:byId.get(typeof l.target==='object'?l.target.id:l.target),
+        proximity:l.proximity
+    })).filter(l=>l.source&&l.target);
 
-    // Radial placement: degree-1 spread evenly around the full circle;
-    // each node's children fan out within a sector around its own angle.
-    const angle=new Map();
-    function place(parentId,parentAngle,sector){
-        const kids=childrenOf.get(parentId)||[];
-        const n=kids.length;
-        kids.forEach((kid,i)=>{
-            const a = n===1 ? parentAngle : parentAngle - sector/2 + sector*(i/(n-1));
-            angle.set(kid,a);
-            place(kid,a,(sector/Math.max(n,1))*0.9);
-        });
-    }
-    const d1=childrenOf.get('you')||[];
-    const N1=Math.max(d1.length,1);
-    d1.forEach((id,i)=>{
-        const a=-Math.PI/2 + i*(2*Math.PI/N1);
-        angle.set(id,a);
-        place(id,a,(2*Math.PI/N1)*0.85);
-    });
+    // Links (drawn behind nodes)
+    const linkSel=zoomLayer.append('g').attr('id','links')
+        .selectAll('line').data(linkData).enter().append('line')
+        .attr('stroke',d=>DEGREE_COLOR[d.target.degree]||'#4ECDC4')
+        .attr('stroke-width',0.9).attr('stroke-dasharray','3 5')
+        .attr('opacity',0)
+        .transition().duration(600).delay((_,i)=>i*30).attr('opacity',d=>({1:.7,2:.4,3:.2}[d.target.degree]||.15));
 
-    nodes.forEach(n=>{
-        if(n.id==='you'){ n.x=cx; n.y=cy; return; }
-        const a=angle.get(n.id)||0;
-        const r=DEGREE_RADIUS[n.degree]||255;
-        n.x=cx+Math.cos(a)*r;
-        n.y=cy+Math.sin(a)*r;
-    });
-
-    // Defs / glow (attached to svg, not zoomLayer — filters are global)
-    const defs=svg.append('defs');
-    const filt=defs.append('filter').attr('id','glow');
-    filt.append('feGaussianBlur').attr('stdDeviation','4').attr('result','blur');
-    const fm=filt.append('feMerge');
-    fm.append('feMergeNode').attr('in','blur');
-    fm.append('feMergeNode').attr('in','SourceGraphic');
-
-    // Orbit rings
-    Object.values(DEGREE_RADIUS).forEach(r=>{
-        zoomLayer.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r)
-            .attr('fill','none').attr('stroke','rgba(124,111,235,0.07)')
-            .attr('stroke-dasharray','3 6');
-    });
-
-    // Links
-    links.forEach((l,i)=>{
-        const s=byId.get(l.source), t=byId.get(l.target);
-        if(!s||!t) return;
-        const op={1:.85,2:.55,3:.35}[t.degree]||.3;
-        zoomLayer.append('line')
-            .attr('x1',s.x).attr('y1',s.y).attr('x2',t.x).attr('y2',t.y)
-            .attr('stroke',DEGREE_COLOR[t.degree]||'#4ECDC4')
-            .attr('stroke-width',1.3).attr('stroke-dasharray','4 4')
-            .attr('opacity',0)
-            .transition().duration(700).delay(150+i*40).attr('opacity',op);
-
-        zoomLayer.append('text')
-            .attr('x',(s.x+t.x)/2).attr('y',(s.y+t.y)/2-4)
-            .attr('text-anchor','middle').attr('font-size','7px')
-            .attr('fill',DEGREE_COLOR[t.degree]).attr('opacity',0)
-            .text(`${l.proximity}%`)
-            .transition().duration(500).delay(450+i*40).attr('opacity',.75);
-    });
-
-    // Nodes
-    const ng=zoomLayer.selectAll('.nd').data(nodes).enter().append('g')
-        .attr('class','nd')
-        .attr('transform',d=>`translate(${d.x},${d.y})`);
-
-    ng.append('circle').attr('r',d=>(DEGREE_SIZE[d.degree]||7)+8)
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0.07);
-
-    ng.append('circle').attr('r',d=>DEGREE_SIZE[d.degree]||7)
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0)
-        .attr('filter','url(#glow)')
-        .transition().duration(600).delay((d,i)=>i*55)
-        .attr('opacity',d=>d.degree===0?.92:.8);
-
-    // "You" star
-    ng.filter(d=>d.degree===0).append('text')
-        .attr('text-anchor','middle').attr('dy','.35em')
-        .attr('font-size','12px').attr('fill','#fff').attr('opacity',0)
-        .text('★')
-        .transition().duration(500).delay(80).attr('opacity',1);
-
-    // % labels inside degree 1/2 nodes
-    ng.filter(d=>d.degree===1||d.degree===2).append('text')
-        .attr('text-anchor','middle').attr('dy','.35em')
-        .attr('font-size',d=>d.degree===1?'8px':'6.5px')
-        .attr('fill','#fff').attr('font-weight','700').attr('opacity',0)
+    // Proximity % labels on links
+    const linkLabSel=zoomLayer.append('g').attr('id','link-labels')
+        .selectAll('text').data(linkData).enter().append('text')
+        .attr('text-anchor','middle').attr('font-size','6px')
+        .attr('fill',d=>DEGREE_COLOR[d.target.degree]).attr('opacity',0)
         .text(d=>`${d.proximity}%`)
-        .transition().duration(500).delay((d,i)=>i*55+200).attr('opacity',.95);
+        .transition().duration(400).delay((_,i)=>i*30+300).attr('opacity',.65);
 
-    // Name labels
-    ng.append('text')
-        .attr('text-anchor','middle')
-        .attr('dy',d=>(DEGREE_SIZE[d.degree]||7)+12)
-        .attr('font-size',d=>d.degree===0?'11px':d.degree===1?'9px':'7.5px')
-        .attr('fill',d=>DEGREE_COLOR[d.degree])
-        .attr('font-family','Noto Serif JP,serif').attr('opacity',0)
-        .text(d=>d.degree<=1?d.name:truncateName(d.name,11))
-        .transition().duration(500).delay((d,i)=>i*55+250).attr('opacity',1);
+    // Node groups
+    const ng=zoomLayer.append('g').attr('id','nodes')
+        .selectAll('g').data(nodes).enter().append('g').attr('class','nd');
 
-    // Click -> modal, hover -> highlight
+    // Aura
+    ng.append('circle').attr('r',d=>(DEGREE_SIZE[d.degree]||6)*2.2)
+        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0.06);
+
+    // Main dot
+    ng.append('circle').attr('r',d=>DEGREE_SIZE[d.degree]||6)
+        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0)
+        .attr('filter',d=>`url(#${GLOW_ID[d.degree]})`)
+        .transition().duration(500).delay((_,i)=>i*40)
+        .attr('opacity',d=>d.degree===0?.95:.82);
+
+    // ★ for "you"
+    ng.filter(d=>d.degree===0).append('text')
+        .attr('text-anchor','middle').attr('dy','.38em')
+        .attr('font-size','11px').attr('fill','#fff').attr('pointer-events','none')
+        .attr('opacity',0).text('★')
+        .transition().duration(400).delay(60).attr('opacity',1);
+
+    // % inside degree-1 and degree-2 nodes
+    ng.filter(d=>d.degree===1||d.degree===2).append('text')
+        .attr('text-anchor','middle').attr('dy','.38em').attr('pointer-events','none')
+        .attr('font-size',d=>d.degree===1?'7.5px':'6px').attr('fill','#fff').attr('font-weight','700')
+        .attr('opacity',0).text(d=>`${d.proximity}%`)
+        .transition().duration(400).delay((_,i)=>i*40+200).attr('opacity',.95);
+
+    // Name labels (floating freely — position updated each tick)
+    const nameSel=zoomLayer.append('g').attr('id','name-labels')
+        .selectAll('text').data(nodes.filter(n=>n.degree<=2)).enter().append('text')
+        .attr('text-anchor','middle').attr('pointer-events','none')
+        .attr('font-size',d=>d.degree===0?'11px':d.degree===1?'8.5px':'7px')
+        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('font-family','Noto Serif JP,serif')
+        .attr('opacity',0)
+        .text(d=>d.degree===0?'You':d.name)
+        .transition().duration(500).delay((_,i)=>i*40+250).attr('opacity',1);
+
+    // Click + hover
     ng.filter(d=>d.degree>0).style('cursor','pointer')
         .on('click',(event,d)=>{ event.stopPropagation(); openNodeModal(d); })
-        .on('mouseover',function(){
-            d3.select(this).select('circle:nth-child(2)').transition().duration(120).attr('opacity',1);
-        })
-        .on('mouseout',function(){
-            d3.select(this).select('circle:nth-child(2)').transition().duration(120).attr('opacity',.8);
+        .on('mouseover',function(){ d3.select(this).select('circle:nth-child(2)').transition().duration(100).attr('opacity',1); })
+        .on('mouseout', function(){ d3.select(this).select('circle:nth-child(2)').transition().duration(100).attr('opacity',.82); });
+
+    // ── TICK ──────────────────────────────────────────────────────────
+    function ticked(){
+        // Links
+        zoomLayer.selectAll('#links line')
+            .attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+            .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+
+        // Link labels at midpoint
+        zoomLayer.selectAll('#link-labels text')
+            .attr('x',d=>(d.source.x+d.target.x)/2)
+            .attr('y',d=>(d.source.y+d.target.y)/2-4);
+
+        // Node groups
+        ng.attr('transform',d=>`translate(${d.x},${d.y})`);
+
+        // Name labels offset below each node
+        nameSel.attr('x',d=>d.x).attr('y',d=>d.y+(DEGREE_SIZE[d.degree]||6)+11);
+
+        // Drift nebula blobs toward archetype centroid of live positions
+        nebulaG.selectAll('.nebula-blob').each(function(){
+            const arch=d3.select(this).attr('data-arch');
+            const members=archetypeNodes[arch];
+            if(!members||!members.length) return;
+            const mx=members.reduce((s,n)=>s+n.x,0)/members.length;
+            const my=members.reduce((s,n)=>s+n.y,0)/members.length;
+            d3.select(this).attr('cx',mx).attr('cy',my);
         });
+    }
+
+    // Force simulation — key forces:
+    // • forceLink  : keep connected nodes close (but loose)
+    // • forceManyBody: gentle repulsion so nodes spread out
+    // • forceX/Y archetype: pull same-archetype nodes toward shared centroid
+    // • forceX/Y degree: gentle concentric bias (not rings — just bias)
+    // • forceCenter : keep the cloud centred
+    const DEGREE_PULL_R={1:90,2:175,3:255};
+
+    _mmSim=d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(linkData).distance(d=>({1:50,2:70,3:55}[d.target.degree]||55)).strength(.12))
+        .force('charge', d3.forceManyBody().strength(-30).distanceMax(180))
+        .force('collide', d3.forceCollide(d=>(DEGREE_SIZE[d.degree]||6)+4))
+        .force('archX', d3.forceX(d=>{
+            if(d.degree===0) return cx;
+            const k=`${d.head_el||'?'}/${d.chest_el||'?'}`;
+            return (centroid[k]||{x:cx}).x;
+        }).strength(d=>d.degree===0?0:.18))
+        .force('archY', d3.forceY(d=>{
+            if(d.degree===0) return cy;
+            const k=`${d.head_el||'?'}/${d.chest_el||'?'}`;
+            return (centroid[k]||{y:cy}).y;
+        }).strength(d=>d.degree===0?0:.18))
+        .force('degR', d3.forceRadial(d=>DEGREE_PULL_R[d.degree]||0, cx, cy).strength(d=>d.degree===0?0:.08))
+        .force('center', d3.forceCenter(cx,cy).strength(.04))
+        .alphaDecay(0.018)
+        .on('tick', ticked);
 }
+
 
 /* ── NODE DETAIL MODAL ── */
 // Wikipedia REST summary API: free, no key, CORS-open, returns thumbnail + extract
