@@ -243,6 +243,8 @@ def build_mindmap(df: pd.DataFrame, head: str, chest: str, tenchu: str) -> dict:
         "id": "you", "name": "You", "degree": 0, "parent": None,
         "domain": "", "themes": "", "birthdate": "", "wd_id": "",
         "head": head, "chest": chest, "tenchu": tenchu, "proximity": 100,
+        "head_el": ELEMENT_MAP.get(head.replace("星",""), "?"),
+        "chest_el": ELEMENT_MAP.get(chest.replace("星",""), "?"),
     }]
     links = []
     seen = set()
@@ -260,6 +262,8 @@ def build_mindmap(df: pd.DataFrame, head: str, chest: str, tenchu: str) -> dict:
                     "wd_id": m["wd_id"],
                     "head": m["head"], "chest": m["chest"], "tenchu": m["tenchu"],
                     "proximity": m["proximity"],
+                    "head_el": ELEMENT_MAP.get(m["head"], "?"),
+                    "chest_el": ELEMENT_MAP.get(m["chest"], "?"),
                 })
                 links.append({"source": parent_id, "target": m["name"], "proximity": m["proximity"]})
                 next_frontier.append((m["name"], m["head"], m["chest"], m["tenchu"]))
@@ -459,54 +463,73 @@ ARCHETYPE_DESC = {
 
 @app.get("/api/galaxy")
 def get_galaxy():
-    """Full database as nodes + within-cluster links for the galaxy visualisation."""
+    """
+    Full database pre-positioned for the Canvas galaxy renderer.
+
+    Positions are computed server-side (no D3 force simulation on the client).
+    Each archetype (Head-element/Chest-element) maps to a cell in a 5×5 grid;
+    nodes are jittered within a Gaussian blob around their cell centre. The
+    payload is kept slim (short keys, no links) so even 12 k rows transfer
+    quickly. A stable random seed ensures positions are reproducible across
+    requests while the 30-min cache is alive.
+    """
+    import math as _math
+
     df = load_database()
     if df.empty:
-        return {"nodes": [], "links": [], "archetypes": {}}
+        return {"nodes": [], "archetypes": {}}
 
+    ELEMENTS   = ["Wood", "Fire", "Earth", "Metal", "Water"]
+    GRID       = 4000          # virtual canvas size (pixels)
+    CELL       = GRID / 5
+    BLOB_SIGMA = 72            # std-dev of Gaussian jitter within cluster
+
+    # Seed so layout is stable for the cache lifetime
+    rng = random.Random(42)
+
+    cluster_counts: dict[str, int] = {}
     nodes = []
-    cluster_members: dict[str, list[str]] = {}
 
     for _, r in df.iterrows():
         name = str(r.get("Name", "")).strip()
         if not name:
             continue
+
         h  = str(r.get("頭 (Head)", "")).strip()
         c  = str(r.get("胸 (Chest)", "")).strip()
         he = ELEMENT_MAP.get(h, "?")
         ce = ELEMENT_MAP.get(c, "?")
         arch = f"{he}/{ce}"
 
-        nodes.append({
-            "id":       name,
-            "name":     name,
-            "head":     h,
-            "chest":    c,
-            "tenchu":   str(r.get("Tenchusatsu", "")).strip(),
-            "domain":   str(r.get("Career Domain", "")).strip(),
-            "birthdate":str(r.get("Birthdate", "")).strip(),
-            "themes":   str(r.get("Life Patterns or Behavioral Themes", ""))[:280].strip(),
-            "wd_id":    str(r.get("wd_id", "")).strip(),
-            "head_el":  he,
-            "chest_el": ce,
-            "archetype": arch,
-        })
-        cluster_members.setdefault(arch, []).append(name)
+        row = ELEMENTS.index(he) if he in ELEMENTS else 2
+        col = ELEMENTS.index(ce) if ce in ELEMENTS else 2
+        ax  = col * CELL + CELL / 2
+        ay  = row * CELL + CELL / 2
 
-    # Links: only within-cluster (same head AND chest element pair).
-    # Cap at 6 members per cluster to keep link count reasonable (~1500 total).
-    from itertools import combinations as _comb
-    links = []
-    for arch, members in cluster_members.items():
-        for a, b in _comb(members[:6], 2):
-            links.append({"source": a, "target": b, "archetype": arch})
+        r_jit   = abs(rng.gauss(0, BLOB_SIGMA))
+        theta   = rng.uniform(0, 2 * _math.pi)
+
+        nodes.append({
+            "n":  name,
+            "x":  round(ax + r_jit * _math.cos(theta), 1),
+            "y":  round(ay + r_jit * _math.sin(theta), 1),
+            "h":  h,  "c":  c,
+            "he": he, "ce": ce,
+            "a":  arch,
+            "k":  str(r.get("Tenchusatsu", "")).strip(),
+            "d":  str(r.get("Career Domain", "")).strip()[:40],
+            "b":  str(r.get("Birthdate", "")).strip(),
+            "t":  str(r.get("Life Patterns or Behavioral Themes", "")).strip()[:200],
+            "w":  str(r.get("wd_id", "")).strip(),
+        })
+        cluster_counts[arch] = cluster_counts.get(arch, 0) + 1
 
     archetypes = {
         arch: {
-            "count": len(members),
+            "count": cnt,
             "description": ARCHETYPE_DESC.get(arch, ""),
         }
-        for arch, members in cluster_members.items()
+        for arch, cnt in cluster_counts.items()
     }
 
-    return {"nodes": nodes, "links": links, "archetypes": archetypes}
+    return {"nodes": nodes, "archetypes": archetypes}
