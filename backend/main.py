@@ -31,25 +31,29 @@ gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 app = FastAPI()
 
 # --- CORS CONFIGURATION ---
-# Add your exact Vercel frontend URL(s) below. Include both with and without
-# trailing slash variants if needed. Also supports local dev on port 5500/3000.
+# allow_origin_regex covers:
+#   • every Vercel preview/deployment URL for this project (any hash)
+#   • the canonical *.vercel.app production URL
+#   • localhost on common dev ports
+# Tighten this once you have a custom domain by replacing the wildcard
+# with "https://yourdomain.com".
 ALLOWED_ORIGINS = [
-    "https://sanmei-project.vercel.app",                                        # Production alias (if set)
-    "https://sanmei-project-lsfau9q2f-johntanbengsiangs-projects.vercel.app",  # Current deployment URL
-    "http://localhost:3000",                                                     # Local dev
-    "http://localhost:5500",                                                     # Local dev (Live Server)
+    "http://localhost:3000",
+    "http://localhost:5500",
     "http://127.0.0.1:5500",
+    "http://localhost:8080",
 ]
 
-# Also allow any *.vercel.app preview URL from this project (covers future re-deploys)
-ALLOWED_ORIGIN_REGEX = r"https://sanmei-project-.*-johntanbengsiangs-projects\.vercel\.app"
+# Regex covers ALL *.vercel.app URLs — both production alias and every
+# unique preview hash Vercel generates on each redeploy.
+ALLOWED_ORIGIN_REGEX = r"https://.*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_origin_regex=ALLOWED_ORIGIN_REGEX,
-    allow_credentials=True,
-    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_credentials=False,          # must be False when using wildcard-style regex
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -466,12 +470,9 @@ def get_galaxy():
     """
     Full database pre-positioned for the Canvas galaxy renderer.
 
-    Positions are computed server-side (no D3 force simulation on the client).
-    Each archetype (Head-element/Chest-element) maps to a cell in a 5×5 grid;
-    nodes are jittered within a Gaussian blob around their cell centre. The
-    payload is kept slim (short keys, no links) so even 12 k rows transfer
-    quickly. A stable random seed ensures positions are reproducible across
-    requests while the 30-min cache is alive.
+    The 5 elements are placed at the vertices of a pentagon (Wu Xing layout).
+    Each node is jittered within a Gaussian blob around its head-element vertex.
+    Chest element is carried as metadata for the ring colour on the client.
     """
     import math as _math
 
@@ -479,14 +480,23 @@ def get_galaxy():
     if df.empty:
         return {"nodes": [], "archetypes": {}}
 
-    ELEMENTS   = ["Wood", "Fire", "Earth", "Metal", "Water"]
-    GRID       = 4000          # virtual canvas size (pixels)
-    CELL       = GRID / 5
-    BLOB_SIGMA = 72            # std-dev of Gaussian jitter within cluster
+    # Pentagon: Fire top, then clockwise — Earth, Metal, Water, Wood
+    # This matches the Wu Xing generating cycle order
+    PENTA_ORDER = ["Fire", "Earth", "Metal", "Water", "Wood"]
+    CX, CY   = 2000, 2000   # centre of virtual canvas
+    PENTA_R  = 1100          # pentagon vertex radius
+    BLOB_R   = 420           # std-dev of gaussian scatter within each element
 
-    # Seed so layout is stable for the cache lifetime
+    el_center = {}
+    for i, el in enumerate(PENTA_ORDER):
+        # Start at top (−π/2), go clockwise
+        angle = -_math.pi / 2 + i * (2 * _math.pi / 5)
+        el_center[el] = (
+            CX + PENTA_R * _math.cos(angle),
+            CY + PENTA_R * _math.sin(angle),
+        )
+
     rng = random.Random(42)
-
     cluster_counts: dict[str, int] = {}
     nodes = []
 
@@ -501,18 +511,14 @@ def get_galaxy():
         ce = ELEMENT_MAP.get(c, "?")
         arch = f"{he}/{ce}"
 
-        row = ELEMENTS.index(he) if he in ELEMENTS else 2
-        col = ELEMENTS.index(ce) if ce in ELEMENTS else 2
-        ax  = col * CELL + CELL / 2
-        ay  = row * CELL + CELL / 2
-
-        r_jit   = abs(rng.gauss(0, BLOB_SIGMA))
-        theta   = rng.uniform(0, 2 * _math.pi)
+        ex, ey = el_center.get(he, (CX, CY))
+        r_jit  = abs(rng.gauss(0, BLOB_R))
+        theta  = rng.uniform(0, 2 * _math.pi)
 
         nodes.append({
             "n":  name,
-            "x":  round(ax + r_jit * _math.cos(theta), 1),
-            "y":  round(ay + r_jit * _math.sin(theta), 1),
+            "x":  round(ex + r_jit * _math.cos(theta), 1),
+            "y":  round(ey + r_jit * _math.sin(theta), 1),
             "h":  h,  "c":  c,
             "he": he, "ce": ce,
             "a":  arch,
@@ -532,4 +538,12 @@ def get_galaxy():
         for arch, cnt in cluster_counts.items()
     }
 
-    return {"nodes": nodes, "archetypes": archetypes}
+    # Also return element centers and pentagon metadata for the client renderer
+    el_centers_out = {el: {"x": round(x,1), "y": round(y,1)} for el,(x,y) in el_center.items()}
+
+    return {
+        "nodes": nodes,
+        "archetypes": archetypes,
+        "el_centers": el_centers_out,
+        "blob_r": BLOB_R,
+    }
