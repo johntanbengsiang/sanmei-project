@@ -213,396 +213,373 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--void);color:va
 
 <script>
 /* ── CONFIG ─────────────────────────────────────────────────────── */
-const API_BASE  = 'https://sanmei-project.onrender.com';
-const GRID      = 4000;          // virtual canvas space
-const ELEMENTS  = ['Wood','Fire','Earth','Metal','Water'];
-const CELL      = GRID / 5;
-const NODE_R    = 4;             // dot radius in virtual coords
-const HIT_R     = 10;            // hit-test radius (more forgiving)
+const API_BASE = 'https://sanmei-project.onrender.com';
+const NODE_R   = 3.5;   // dot radius in virtual coords
+const HIT_R    = 12;    // hit-test radius
 
 const EL_HEX = {
   Wood:'#4CAF82', Fire:'#FF6B6B', Earth:'#C8A85A',
   Metal:'#A8B8D0', Water:'#5B9BD5', '?':'#524E6E'
 };
-const EL_GLYPH = {Wood:'木',Fire:'火',Earth:'土',Metal:'金',Water:'水'};
+const EL_GLYPH = {Wood:'木', Fire:'火', Earth:'土', Metal:'金', Water:'水'};
 
-/* ── VIEWPORT / ZOOM STATE ─────────────────────────────────────── */
-// Transform: canvas pixel = (virtualX * scale) + offsetX
-let tx = 0, ty = 0, scale = 1;
-let W = 0, H = 0;   // canvas pixel size
+// Wu Xing generating cycle: Wood→Fire→Earth→Metal→Water→Wood
+const GENERATING = [['Wood','Fire'],['Fire','Earth'],['Earth','Metal'],['Metal','Water'],['Water','Wood']];
+// Wu Xing controlling cycle: Wood→Earth→Water→Fire→Metal→Wood
+const CONTROLLING= [['Wood','Earth'],['Earth','Water'],['Water','Fire'],['Fire','Metal'],['Metal','Wood']];
 
-function toScreen(vx, vy) { return [vx * scale + tx, vy * scale + ty]; }
-function toVirtual(px, py){ return [(px - tx) / scale, (py - ty) / scale]; }
+/* ── VIEWPORT ───────────────────────────────────────────────────── */
+let tx=0, ty=0, scale=1, W=0, H=0;
+function toScreen(vx,vy){ return [vx*scale+tx, vy*scale+ty]; }
+function toVirtual(px,py){ return [(px-tx)/scale, (py-ty)/scale]; }
 
 /* ── DATA ──────────────────────────────────────────────────────── */
-let nodes = [];          // full set from API
-let drawn = [];          // currently visible (filtered)
-let archetypesMeta = {};
-let activeEl = 'All', searchQ = '';
-let hoveredNode = null, selectedNode = null;
+let nodes=[], drawn=[], archetypesMeta={}, elCenters={}, blobR=420;
+let activeEl='All', searchQ='';
+let hoveredNode=null, selectedNode=null;
 
-/* ── CANVAS SETUP ───────────────────────────────────────────────── */
+/* ── CANVAS ─────────────────────────────────────────────────────── */
 const cvs = document.getElementById('canvas');
-const ctx = cvs.getContext('2d');
+const ctx  = cvs.getContext('2d');
 
-function resize() {
+function resize(){
   W = cvs.width  = window.innerWidth;
   H = cvs.height = window.innerHeight;
-  // On first resize fit the whole grid
-  if (scale === 1 && tx === 0 && ty === 0) fitAll();
+  if(scale===1 && tx===0 && ty===0) fitAll();
   draw();
 }
-
-function fitAll() {
-  const padding = 80;
-  scale = Math.min((W - padding*2) / GRID, (H - padding*2) / GRID);
-  tx = (W - GRID * scale) / 2;
-  ty = (H - GRID * scale) / 2 + 20; // 20px for topbar offset
+function fitAll(){
+  const pad=100;
+  // Bounding box of all nodes
+  if(!nodes.length){ scale=0.18; tx=W/2-2000*scale; ty=H/2-2000*scale; return; }
+  const xs=nodes.map(n=>n.x), ys=nodes.map(n=>n.y);
+  const x0=Math.min(...xs)-blobR, x1=Math.max(...xs)+blobR;
+  const y0=Math.min(...ys)-blobR, y1=Math.max(...ys)+blobR;
+  scale = Math.min((W-pad*2)/(x1-x0), (H-pad*2-50)/(y1-y0));
+  tx = (W-(x1+x0)*scale)/2;
+  ty = (H-50-(y1+y0)*scale)/2 + 45;
 }
-
 window.addEventListener('resize', resize);
 
-/* ── RENDER ─────────────────────────────────────────────────────── */
-function hexToRgb(hex){
-  const r=parseInt(hex.slice(1,3),16);
-  const g=parseInt(hex.slice(3,5),16);
-  const b=parseInt(hex.slice(5,7),16);
-  return `${r},${g},${b}`;
-}
-
-// Pre-compute colour strings once
-const EL_RGBA_FULL  = {};   // full opacity (active / All)
-const EL_RGBA_DIM   = {};   // dimmed (filtered out)
-const EL_RGBA_HOVER = {};   // hover highlight
-const EL_RGBA_RING  = {};   // chest ring
+/* ── COLOUR HELPERS ─────────────────────────────────────────────── */
+function hexToRgb(h){ return `${parseInt(h.slice(1,3),16)},${parseInt(h.slice(3,5),16)},${parseInt(h.slice(5,7),16)}`; }
+const FULL={}, DIM={}, HOV={}, RING={};
 Object.entries(EL_HEX).forEach(([el,hex])=>{
-  const rgb = hexToRgb(hex);
-  EL_RGBA_FULL[el]  = `rgba(${rgb},0.82)`;
-  EL_RGBA_DIM[el]   = `rgba(${rgb},0.06)`;
-  EL_RGBA_HOVER[el] = `rgba(${rgb},1)`;
-  EL_RGBA_RING[el]  = `rgba(${rgb},0.45)`;
+  const rgb=hexToRgb(hex);
+  FULL[el] =`rgba(${rgb},.82)`; DIM[el]=`rgba(${rgb},.055)`;
+  HOV[el]  =`rgba(${rgb},1)`;  RING[el]=`rgba(${rgb},.5)`;
 });
 
-function draw() {
-  ctx.clearRect(0, 0, W, H);
+/* ── DRAW ───────────────────────────────────────────────────────── */
+function draw(){
+  ctx.clearRect(0,0,W,H);
 
-  // Background nebula blobs per archetype (cheap radial gradient)
-  if (activeEl === 'All') {
-    Object.entries(archetypesMeta).forEach(([arch, meta]) => {
-      const [he] = arch.split('/');
-      const row  = ELEMENTS.indexOf(he);
-      const col  = ELEMENTS.indexOf(arch.split('/')[1]);
-      if (row < 0 || col < 0) return;
-      const [sx, sy] = toScreen(col*CELL+CELL/2, row*CELL+CELL/2);
-      const r  = Math.sqrt(meta.count) * 9 * scale;
-      const col2= EL_HEX[he]||'#524E6E';
-      const rgb = hexToRgb(col2);
-      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
-      g.addColorStop(0,   `rgba(${rgb},0.04)`);
-      g.addColorStop(1,   `rgba(${rgb},0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill();
+  // ── 1. Element circle boundaries ────────────────────────────────
+  Object.entries(elCenters).forEach(([el,{x,y}])=>{
+    if(activeEl!=='All' && el!==activeEl) return;
+    const [sx,sy]=toScreen(x,y);
+    const r=blobR*scale;
+    const rgb=hexToRgb(EL_HEX[el]);
+
+    // Outer subtle ring (dashed)
+    ctx.save();
+    ctx.setLineDash([6*scale,10*scale]);
+    ctx.strokeStyle=`rgba(${rgb},.18)`;
+    ctx.lineWidth=Math.max(1,1.5*scale);
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+
+    // Radial glow fill
+    const grd=ctx.createRadialGradient(sx,sy,0,sx,sy,r);
+    grd.addColorStop(0,  `rgba(${rgb},.07)`);
+    grd.addColorStop(.55,`rgba(${rgb},.04)`);
+    grd.addColorStop(1,  `rgba(${rgb},0)`);
+    ctx.fillStyle=grd;
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+  });
+
+  // ── 2. Wu Xing relationship lines ───────────────────────────────
+  if(activeEl==='All' && scale>0.06){
+    // Generating (生) — outer arcs connecting adjacent pentagon vertices
+    GENERATING.forEach(([a,b])=>{
+      const p=elCenters[a], q=elCenters[b];
+      if(!p||!q) return;
+      const [ax,ay]=toScreen(p.x,p.y);
+      const [bx,by]=toScreen(q.x,q.y);
+      const rgb=hexToRgb(EL_HEX[a]);
+      ctx.save();
+      ctx.strokeStyle=`rgba(${rgb},.22)`;
+      ctx.lineWidth=Math.max(.8,1.4*scale);
+      ctx.setLineDash([]);
+      // Slightly curved: control point pushed outward from centre
+      const mx=(ax+bx)/2, my=(ay+by)/2;
+      const [cx2,cy2]=toScreen(2000,2000); // virtual centre
+      const cpx=mx+(mx-cx2)*0.18, cpy=my+(my-cy2)*0.18;
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.quadraticCurveTo(cpx,cpy,bx,by); ctx.stroke();
+      // Arrow head
+      const angle=Math.atan2(by-cpy,bx-cpx);
+      const aw=7*scale;
+      ctx.fillStyle=`rgba(${rgb},.3)`;
+      ctx.beginPath();
+      ctx.moveTo(bx,by);
+      ctx.lineTo(bx-aw*Math.cos(angle-0.4),by-aw*Math.sin(angle-0.4));
+      ctx.lineTo(bx-aw*Math.cos(angle+0.4),by-aw*Math.sin(angle+0.4));
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+
+    // Controlling (克) — inner pentagram lines
+    CONTROLLING.forEach(([a,b])=>{
+      const p=elCenters[a], q=elCenters[b];
+      if(!p||!q) return;
+      const [ax,ay]=toScreen(p.x,p.y);
+      const [bx,by]=toScreen(q.x,q.y);
+      ctx.save();
+      ctx.strokeStyle=`rgba(255,100,100,.12)`;
+      ctx.lineWidth=Math.max(.5,0.9*scale);
+      ctx.setLineDash([4*scale,8*scale]);
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+      ctx.restore();
     });
   }
 
-  // Nodes (single pass, no SVG DOM overhead)
-  const r = Math.max(1.5, NODE_R * scale);
+  // ── 3. Element centre glyphs ─────────────────────────────────────
+  if(scale > 0.055){
+    Object.entries(elCenters).forEach(([el,{x,y}])=>{
+      if(activeEl!=='All' && el!==activeEl) return;
+      const [sx,sy]=toScreen(x,y);
+      const rgb=hexToRgb(EL_HEX[el]);
+      const fs=Math.max(14, 52*scale);
 
-  for (const n of drawn) {
-    const [sx, sy] = toScreen(n.x, n.y);
-    if (sx < -r || sx > W+r || sy < -r || sy > H+r) continue; // viewport cull
+      // Kanji glyph at element centre
+      ctx.save();
+      ctx.globalAlpha=0.12;
+      ctx.fillStyle=EL_HEX[el];
+      ctx.font=`300 ${fs}px 'Noto Serif JP',serif`;
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(EL_GLYPH[el], sx, sy);
+      ctx.restore();
 
-    const isHov    = n === hoveredNode;
-    const isSel    = n === selectedNode;
-    const nodeR    = isHov || isSel ? r * 1.9 : r;
-    const fillCol  = n._dim ? EL_RGBA_DIM[n.he] : (isHov||isSel ? EL_RGBA_HOVER[n.he] : EL_RGBA_FULL[n.he]);
+      // Element name label above glyph (only above a useful zoom level)
+      if(scale > 0.1){
+        const labelFs=Math.max(9, 14*scale);
+        ctx.save();
+        ctx.fillStyle=`rgba(${rgb},.55)`;
+        ctx.font=`500 ${labelFs}px Inter,sans-serif`;
+        ctx.textAlign='center';
+        ctx.textBaseline='bottom';
+        ctx.letterSpacing='0.1em';
+        ctx.fillText(el.toUpperCase(), sx, sy - fs*0.6 - 4*scale);
+        ctx.restore();
+      }
+    });
+  }
 
-    // Outer glow for hovered/selected
-    if (isHov || isSel) {
-      const rgb = hexToRgb(EL_HEX[n.he]||'#524E6E');
-      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, nodeR*3);
-      glow.addColorStop(0, `rgba(${rgb},0.25)`);
-      glow.addColorStop(1, `rgba(${rgb},0)`);
-      ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(sx, sy, nodeR*3, 0, Math.PI*2); ctx.fill();
+  // ── 4. Nodes ─────────────────────────────────────────────────────
+  const r=Math.max(1.2, NODE_R*scale);
+
+  for(const n of drawn){
+    const [sx,sy]=toScreen(n.x,n.y);
+    if(sx<-r*4||sx>W+r*4||sy<-r*4||sy>H+r*4) continue;
+
+    const isHov=n===hoveredNode, isSel=n===selectedNode;
+    const nr=isHov||isSel ? r*2.2 : r;
+
+    if(isHov||isSel){
+      const rgb=hexToRgb(EL_HEX[n.he]||'#524E6E');
+      const glow=ctx.createRadialGradient(sx,sy,0,sx,sy,nr*4);
+      glow.addColorStop(0,`rgba(${rgb},.3)`);
+      glow.addColorStop(1,`rgba(${rgb},0)`);
+      ctx.fillStyle=glow;
+      ctx.beginPath(); ctx.arc(sx,sy,nr*4,0,Math.PI*2); ctx.fill();
     }
 
-    // Fill (head element colour)
-    ctx.fillStyle = fillCol;
-    ctx.beginPath(); ctx.arc(sx, sy, nodeR, 0, Math.PI*2); ctx.fill();
+    // Core dot (head element colour)
+    ctx.fillStyle=n._dim ? DIM[n.he]||DIM['?'] : (isHov||isSel ? HOV[n.he] : FULL[n.he]||FULL['?']);
+    ctx.beginPath(); ctx.arc(sx,sy,nr,0,Math.PI*2); ctx.fill();
 
-    // Chest element ring (only when not dimmed)
-    if (!n._dim && n.ce !== n.he) {
-      ctx.strokeStyle = n._dim ? 'transparent' : EL_RGBA_RING[n.ce];
-      ctx.lineWidth   = Math.max(0.8, 1.2 * scale);
-      ctx.beginPath(); ctx.arc(sx, sy, nodeR+1.2*scale, 0, Math.PI*2); ctx.stroke();
+    // Chest ring
+    if(!n._dim && n.ce!==n.he){
+      ctx.strokeStyle=RING[n.ce]||RING['?'];
+      ctx.lineWidth=Math.max(.7, 1.3*scale);
+      ctx.beginPath(); ctx.arc(sx,sy,nr+1.5*scale,0,Math.PI*2); ctx.stroke();
     }
 
-    // Name label for hovered / selected
-    if (isHov || isSel) {
-      ctx.fillStyle   = '#F0EEF8';
-      ctx.font        = `${Math.max(10, 11*scale)}px Inter, sans-serif`;
-      ctx.textAlign   = 'center';
-      ctx.fillText(n.n, sx, sy - nodeR - 5*scale);
+    // Name on hover/select
+    if(isHov||isSel){
+      const fs=Math.max(10,12*scale);
+      ctx.fillStyle='#F0EEF8';
+      ctx.font=`500 ${fs}px Inter,sans-serif`;
+      ctx.textAlign='center';
+      ctx.textBaseline='bottom';
+      ctx.fillText(n.n, sx, sy-nr-4*scale);
     }
   }
 }
 
-/* ── CLUSTER LABELS (HTML divs, positioned via CSS transform) ───── */
-function updateLabels() {
-  const container = document.getElementById('labels');
-  container.innerHTML = '';
-  if (scale < 0.12) return; // too small to show labels
+/* ── LABELS ─────────────────────────────────────────────────────── */
+function updateLabels(){
+  const container=document.getElementById('labels');
+  container.innerHTML='';
+  if(scale<0.09) return;
 
-  Object.entries(archetypesMeta).forEach(([arch, meta]) => {
-    const [he, ce] = arch.split('/');
-    const row = ELEMENTS.indexOf(he), col = ELEMENTS.indexOf(ce);
-    if (row < 0 || col < 0) return;
-    if (activeEl !== 'All' && he !== activeEl && ce !== activeEl) return;
+  Object.entries(elCenters).forEach(([el,{x,y}])=>{
+    if(activeEl!=='All' && el!==activeEl) return;
+    const [sx,sy]=toScreen(x,y);
+    const r=blobR*scale;
+    // Place label outside the circle, toward the outside of the pentagon
+    const cx2=toScreen(2000,2000)[0], cy2=toScreen(2000,2000)[1];
+    const dx=sx-cx2, dy=sy-cy2;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    const lx=sx+(dx/len)*(r+18), ly=sy+(dy/len)*(r+18);
+    if(lx<0||lx>W||ly<40||ly>H) return;
 
-    const blobR = Math.sqrt(meta.count) * 9 * scale;
-    const [sx, sy] = toScreen(col*CELL+CELL/2, row*CELL+CELL/2);
-    const labelY = sy - blobR - 14;
-    if (labelY < 45 || sx < 0 || sx > W) return;
+    const count=Object.entries(archetypesMeta)
+      .filter(([a])=>a.startsWith(el+'/'))
+      .reduce((s,[,v])=>s+v.count,0);
 
-    const col2 = EL_HEX[he]||'#524E6E';
-    const div  = document.createElement('div');
-    div.className = 'cl';
-    div.style.left = sx+'px';
-    div.style.top  = labelY+'px';
-    div.style.color = col2;
-    div.innerHTML =
-      `<div class="cl-arch">${EL_GLYPH[he]||''} ${he} ▸ ${ce}</div>`+
-      `<div class="cl-count">${meta.count} people</div>`;
+    const div=document.createElement('div');
+    div.className='cl';
+    div.style.left=lx+'px';
+    div.style.top=ly+'px';
+    div.style.color=EL_HEX[el];
+    div.innerHTML=
+      `<div class="cl-arch">${EL_GLYPH[el]} ${el}</div>`+
+      `<div class="cl-count">${count} people</div>`;
     container.appendChild(div);
   });
 }
 
 /* ── PAN / ZOOM ─────────────────────────────────────────────────── */
-let drag = null;
-
-cvs.addEventListener('mousedown', e => {
-  if (e.button !== 0) return;
-  drag = {sx: e.clientX, sy: e.clientY, tx, ty};
+let drag=null;
+cvs.addEventListener('mousedown',e=>{ if(e.button!==0)return; drag={sx:e.clientX,sy:e.clientY,tx,ty}; });
+window.addEventListener('mousemove',e=>{
+  if(drag){ tx=drag.tx+(e.clientX-drag.sx); ty=drag.ty+(e.clientY-drag.sy); draw(); updateLabels(); return; }
+  handleHover(e.clientX,e.clientY);
 });
-window.addEventListener('mousemove', e => {
-  if (drag) {
-    tx = drag.tx + (e.clientX - drag.sx);
-    ty = drag.ty + (e.clientY - drag.sy);
-    draw(); updateLabels();
-    return;
-  }
-  handleHover(e.clientX, e.clientY);
-});
-window.addEventListener('mouseup', () => { drag = null; });
+window.addEventListener('mouseup',()=>{ drag=null; });
+cvs.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12); },{passive:false});
 
-cvs.addEventListener('wheel', e => {
+let lastPinch=null;
+cvs.addEventListener('touchstart',e=>{ if(e.touches.length===2){lastPinch=pDist(e);drag=null;}else if(e.touches.length===1){const t=e.touches[0];drag={sx:t.clientX,sy:t.clientY,tx,ty};} },{passive:true});
+cvs.addEventListener('touchmove',e=>{
+  if(e.touches.length===2&&lastPinch){const d=pDist(e);zoomAt((e.touches[0].clientX+e.touches[1].clientX)/2,(e.touches[0].clientY+e.touches[1].clientY)/2,d/lastPinch);lastPinch=d;}
+  else if(e.touches.length===1&&drag){const t=e.touches[0];tx=drag.tx+(t.clientX-drag.sx);ty=drag.ty+(t.clientY-drag.sy);draw();updateLabels();}
   e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
-  zoomAt(e.clientX, e.clientY, factor);
-}, {passive: false});
+},{passive:false});
+cvs.addEventListener('touchend',()=>{drag=null;lastPinch=null;});
+function pDist(e){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;return Math.sqrt(dx*dx+dy*dy);}
+function zoomAt(px,py,f){const ns=Math.min(10,Math.max(0.03,scale*f));tx=px-(px-tx)*(ns/scale);ty=py-(py-ty)*(ns/scale);scale=ns;draw();updateLabels();}
 
-// Pinch
-let lastPinch = null;
-cvs.addEventListener('touchstart', e => {
-  if (e.touches.length === 2) {
-    lastPinch = pinchDist(e);
-    drag = null;
-  } else if (e.touches.length === 1) {
-    const t = e.touches[0];
-    drag = {sx: t.clientX, sy: t.clientY, tx, ty};
-  }
-}, {passive: true});
-cvs.addEventListener('touchmove', e => {
-  if (e.touches.length === 2 && lastPinch) {
-    const d = pinchDist(e);
-    const cx = (e.touches[0].clientX + e.touches[1].clientX)/2;
-    const cy = (e.touches[0].clientY + e.touches[1].clientY)/2;
-    zoomAt(cx, cy, d/lastPinch);
-    lastPinch = d;
-  } else if (e.touches.length === 1 && drag) {
-    const t = e.touches[0];
-    tx = drag.tx + (t.clientX - drag.sx);
-    ty = drag.ty + (t.clientY - drag.sy);
-    draw(); updateLabels();
-  }
-  e.preventDefault();
-}, {passive: false});
-cvs.addEventListener('touchend', () => { drag = null; lastPinch = null; });
-function pinchDist(e){ const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY; return Math.sqrt(dx*dx+dy*dy); }
-
-function zoomAt(px, py, factor) {
-  const newScale = Math.min(8, Math.max(0.04, scale * factor));
-  tx = px - (px - tx) * (newScale/scale);
-  ty = py - (py - ty) * (newScale/scale);
-  scale = newScale;
-  draw(); updateLabels();
-}
-
-document.getElementById('zIn').onclick    = () => zoomAt(W/2, H/2, 1.4);
-document.getElementById('zOut').onclick   = () => zoomAt(W/2, H/2, 1/1.4);
-document.getElementById('zReset').onclick = () => { fitAll(); draw(); updateLabels(); };
+document.getElementById('zIn').onclick    =()=>zoomAt(W/2,H/2,1.4);
+document.getElementById('zOut').onclick   =()=>zoomAt(W/2,H/2,1/1.4);
+document.getElementById('zReset').onclick =()=>{fitAll();draw();updateLabels();};
 
 /* ── HIT TEST ───────────────────────────────────────────────────── */
-function hitTest(px, py) {
-  const [vx, vy] = toVirtual(px, py);
-  const vHit = HIT_R / scale;   // hit radius in virtual coords
-  let best = null, bestD2 = vHit*vHit;
-  for (const n of drawn) {
-    const dx = n.x - vx, dy = n.y - vy;
-    const d2 = dx*dx + dy*dy;
-    if (d2 < bestD2) { bestD2 = d2; best = n; }
-  }
+function hitTest(px,py){
+  const [vx,vy]=toVirtual(px,py);
+  const vHit=HIT_R/scale;
+  let best=null,bestD2=vHit*vHit;
+  for(const n of drawn){ const dx=n.x-vx,dy=n.y-vy,d2=dx*dx+dy*dy; if(d2<bestD2){bestD2=d2;best=n;} }
   return best;
 }
-
-function handleHover(px, py) {
-  const tip = document.getElementById('tip');
-  const n = hitTest(px, py);
-  if (n !== hoveredNode) {
-    hoveredNode = n;
-    draw();
-    if (n) {
-      document.getElementById('tName').textContent = n.n;
-      document.getElementById('tMeta').textContent =
-        [n.d, n.b ? 'b. '+n.b : ''].filter(Boolean).join(' · ');
-      document.getElementById('tArch').innerHTML =
+function handleHover(px,py){
+  const tip=document.getElementById('tip');
+  const n=hitTest(px,py);
+  if(n!==hoveredNode){
+    hoveredNode=n; draw();
+    if(n){
+      document.getElementById('tName').textContent=n.n;
+      document.getElementById('tMeta').textContent=[n.d,n.b?'b. '+n.b:''].filter(Boolean).join(' · ');
+      document.getElementById('tArch').innerHTML=
         `<span style="color:${EL_HEX[n.he]}">${n.he}</span>`+
         ` <span style="color:#524E6E">▸</span> `+
         `<span style="color:${EL_HEX[n.ce]}">${n.ce}</span>`+
         `<span style="color:#524E6E;font-size:.6rem"> · ${n.h} / ${n.c}</span>`;
-      const tw=220, th=85;
-      tip.style.left=(px+14+tw>W ? px-tw-10 : px+14)+'px';
-      tip.style.top =(py+th>H   ? py-th     : py+10)+'px';
+      const tw=220,th=85;
+      tip.style.left=(px+14+tw>W?px-tw-10:px+14)+'px';
+      tip.style.top =(py+th>H?py-th:py+10)+'px';
       tip.style.opacity='1';
-    } else {
-      tip.style.opacity='0';
-    }
+    } else { tip.style.opacity='0'; }
   }
 }
-
-cvs.addEventListener('click', e => {
-  const n = hitTest(e.clientX, e.clientY);
-  if (n) { selectedNode = n; openPanel(n); draw(); }
-  else   { closePanel(); selectedNode = null; draw(); }
+cvs.addEventListener('click',e=>{
+  const n=hitTest(e.clientX,e.clientY);
+  if(n){selectedNode=n;openPanel(n);draw();}
+  else{closePanel();selectedNode=null;draw();}
 });
 
 /* ── FILTER ─────────────────────────────────────────────────────── */
-function applyFilter() {
-  const q = searchQ.toLowerCase();
-  const el = activeEl;
-  drawn = nodes.map(n => {
-    const elMatch = el === 'All' || n.he === el || n.ce === el;
-    const qMatch  = !q || n.n.toLowerCase().includes(q) || (n.d||'').toLowerCase().includes(q);
-    return { ...n, _dim: !(elMatch && qMatch) };
+function applyFilter(){
+  const q=searchQ.toLowerCase(),el=activeEl;
+  drawn=nodes.map(n=>{
+    const em=el==='All'||n.he===el||n.ce===el;
+    const qm=!q||n.n.toLowerCase().includes(q)||(n.d||'').toLowerCase().includes(q);
+    return {...n,_dim:!(em&&qm)};
   });
-  const vis = drawn.filter(n => !n._dim).length;
-  document.getElementById('sTxt').textContent =
-    `${vis} of ${nodes.length} people`;
-  document.getElementById('sInfo').textContent =
-    el !== 'All' ? `${EL_GLYPH[el]||''} ${el} element` : `${Object.keys(archetypesMeta).length} archetypes`;
+  const vis=drawn.filter(n=>!n._dim).length;
+  document.getElementById('sTxt').textContent=`${vis} of ${nodes.length} people`;
+  document.getElementById('sInfo').textContent=el!=='All'?`${EL_GLYPH[el]||''} ${el} element`:`5 elements · ${Object.keys(archetypesMeta).length} archetypes`;
   draw(); updateLabels();
 }
-
-document.querySelectorAll('.el-btn').forEach(btn => btn.addEventListener('click', () => {
-  document.querySelectorAll('.el-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  activeEl = btn.dataset.el;
-  applyFilter();
+document.querySelectorAll('.el-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  document.querySelectorAll('.el-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); activeEl=btn.dataset.el; applyFilter();
 }));
-document.getElementById('searchBox').addEventListener('input', e => {
-  searchQ = e.target.value;
-  applyFilter();
-});
+document.getElementById('searchBox').addEventListener('input',e=>{searchQ=e.target.value;applyFilter();});
 
 /* ── SIDE PANEL ─────────────────────────────────────────────────── */
-function openPanel(n) {
-  const hCol = EL_HEX[n.he]||'#524E6E', cCol = EL_HEX[n.ce]||'#524E6E';
-  document.getElementById('pName').textContent = n.n;
-  document.getElementById('pMeta').textContent =
-    [n.d, n.b?'b. '+n.b:''].filter(Boolean).join(' · ');
-  document.getElementById('pStars').textContent =
-    `頭 ${n.h||'—'} · 胸 ${n.c||'—'} · 天中殺 ${n.k||'—'}`;
-
-  const pill = document.getElementById('pPill');
-  pill.style.borderColor = hCol; pill.style.color = hCol;
-  pill.innerHTML =
-    `<span style="color:${hCol}">${n.he}</span>`+
-    `<span style="color:#524E6E"> ▸ </span>`+
-    `<span style="color:${cCol}">${n.ce}</span>`+
-    `<span style="color:#524E6E;font-weight:300"> · ${(archetypesMeta[n.a]||{}).description||''}</span>`;
-
-  document.getElementById('pThemes').textContent =
-    n.t && !n.t.includes('[auto-placeholder') ? n.t : 'Profile enrichment pending.';
-  document.getElementById('pImgWrap').innerHTML = '<div class="p-img-shimmer"></div>';
-  document.getElementById('pWikiLink').innerHTML = '';
+function openPanel(n){
+  const hCol=EL_HEX[n.he]||'#524E6E',cCol=EL_HEX[n.ce]||'#524E6E';
+  document.getElementById('pName').textContent=n.n;
+  document.getElementById('pMeta').textContent=[n.d,n.b?'b. '+n.b:''].filter(Boolean).join(' · ');
+  document.getElementById('pStars').textContent=`頭 ${n.h||'—'} · 胸 ${n.c||'—'} · 天中殺 ${n.k||'—'}`;
+  const pill=document.getElementById('pPill');
+  pill.style.borderColor=hCol; pill.style.color=hCol;
+  pill.innerHTML=`<span style="color:${hCol}">${n.he}</span><span style="color:#524E6E"> ▸ </span><span style="color:${cCol}">${n.ce}</span><span style="color:#524E6E;font-weight:300"> · ${(archetypesMeta[n.a]||{}).description||''}</span>`;
+  document.getElementById('pThemes').textContent=n.t&&!n.t.includes('[auto-placeholder')?n.t:'Profile enrichment pending.';
+  document.getElementById('pImgWrap').innerHTML='<div class="p-img-shimmer"></div>';
+  document.getElementById('pWikiLink').innerHTML='';
   document.getElementById('panel').classList.add('open');
-
-  fetchWiki(n.w, n.n).then(wiki => {
-    const iw = document.getElementById('pImgWrap');
-    const wl = document.getElementById('pWikiLink');
-    if (!iw) return;
-    iw.innerHTML = wiki?.thumb
-      ? `<img src="${wiki.thumb}" alt="${n.n}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`
-      : `<div class="p-img-fb">${n.n.charAt(0)}</div>`;
-    if (wiki?.pageUrl && wl)
-      wl.innerHTML = `<a class="p-wlink" href="${wiki.pageUrl}" target="_blank" rel="noopener">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-          <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-        </svg>Wikipedia</a>`;
+  fetchWiki(n.w,n.n).then(wiki=>{
+    const iw=document.getElementById('pImgWrap'),wl=document.getElementById('pWikiLink');
+    if(!iw)return;
+    iw.innerHTML=wiki?.thumb?`<img src="${wiki.thumb}" alt="${n.n}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:`<div class="p-img-fb">${n.n.charAt(0)}</div>`;
+    if(wiki?.pageUrl&&wl) wl.innerHTML=`<a class="p-wlink" href="${wiki.pageUrl}" target="_blank" rel="noopener"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Wikipedia</a>`;
   });
 }
 function closePanel(){document.getElementById('panel').classList.remove('open');}
-document.getElementById('pClose').addEventListener('click', closePanel);
+document.getElementById('pClose').addEventListener('click',closePanel);
 
 /* ── WIKIPEDIA ──────────────────────────────────────────────────── */
-async function fetchWiki(wdId, name) {
-  if (!wdId||wdId==='nan'||!wdId.trim()) return fetchWikiByTitle(name);
-  try {
-    const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(wdId)}&props=sitelinks&sitefilter=enwiki&format=json&origin=*`);
-    const d = await r.json();
-    const title = d.entities?.[wdId]?.sitelinks?.enwiki?.title;
-    return title ? fetchWikiByTitle(title) : fetchWikiByTitle(name);
-  } catch(e){ return fetchWikiByTitle(name); }
+async function fetchWiki(wdId,name){
+  if(!wdId||wdId==='nan'||!wdId.trim())return fetchWikiT(name);
+  try{const r=await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(wdId)}&props=sitelinks&sitefilter=enwiki&format=json&origin=*`);const d=await r.json();const t=d.entities?.[wdId]?.sitelinks?.enwiki?.title;return t?fetchWikiT(t):fetchWikiT(name);}catch(e){return fetchWikiT(name);}
 }
-async function fetchWikiByTitle(t) {
-  try {
-    const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(t)}`);
-    if (!r.ok) return null;
-    const d = await r.json();
-    return {thumb:d.thumbnail?.source||null, pageUrl:d.content_urls?.desktop?.page||null};
-  } catch(e){ return null; }
+async function fetchWikiT(t){
+  try{const r=await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(t)}`);if(!r.ok)return null;const d=await r.json();return{thumb:d.thumbnail?.source||null,pageUrl:d.content_urls?.desktop?.page||null};}catch(e){return null;}
 }
 
 /* ── STARFIELD ──────────────────────────────────────────────────── */
-(function(){
-  const c=document.getElementById('stars');
-  for(let i=0;i<100;i++){
-    const s=document.createElement('div'); s.className='s';
-    const sz=Math.random()*1.6+.3;
-    s.style.cssText=`width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;--t:${2+Math.random()*4}s;--d:${Math.random()*4}s;--lo:${.05+Math.random()*.2};--hi:${.4+Math.random()*.5}`;
-    c.appendChild(s);
-  }
-})();
+(function(){const c=document.getElementById('stars');for(let i=0;i<100;i++){const s=document.createElement('div');s.className='s';const sz=Math.random()*1.6+.3;s.style.cssText=`width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;--t:${2+Math.random()*4}s;--d:${Math.random()*4}s;--lo:${.05+Math.random()*.2};--hi:${.4+Math.random()*.5}`;c.appendChild(s);}})();
 
 /* ── BOOT ───────────────────────────────────────────────────────── */
-async function loadData() {
-  try {
-    const res = await fetch(`${API_BASE}/api/galaxy`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    nodes = data.nodes || [];
-    archetypesMeta = data.archetypes || {};
-    drawn = nodes.map(n => ({...n, _dim: false}));
-    document.getElementById('sTxt').textContent =
-      `${nodes.length} people · ${Object.keys(archetypesMeta).length} archetypes`;
-    document.getElementById('sInfo').textContent = 'Scroll to zoom · Drag to pan · Click for profile';
-    resize();          // sets W/H, calls fitAll + draw
+async function loadData(){
+  try{
+    const res=await fetch(`${API_BASE}/api/galaxy`);
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    nodes=data.nodes||[];
+    archetypesMeta=data.archetypes||{};
+    elCenters=data.el_centers||{};
+    blobR=data.blob_r||420;
+    drawn=nodes.map(n=>({...n,_dim:false}));
+    document.getElementById('sTxt').textContent=`${nodes.length} people · 5 elements`;
+    document.getElementById('sInfo').textContent='Scroll to zoom · Drag to pan · Click for profile';
+    resize();
     updateLabels();
-  } catch(e) {
-    document.getElementById('sTxt').textContent = `Error: ${e.message}`;
-  }
+  }catch(e){document.getElementById('sTxt').textContent=`Error: ${e.message}`;}
 }
 
 resize();
