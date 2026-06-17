@@ -195,15 +195,22 @@ def calculate_tenchusatsu(day_stem: str, day_branch: str) -> str:
     return mapping[void_offset]
 
 # --- HISTORICAL PROFILE MATCHER ---
+def _strip(s: str) -> str:
+    """Strip 星 and 天中殺 suffixes used inconsistently across callers."""
+    return str(s).strip().replace("星", "").replace("天中殺", "")
+
 def find_matches(df: pd.DataFrame, head: str, chest: str, tenchu: str,
                   exclude: set = None, top_n: int = 5) -> list:
-    """Score every row in df against (head, chest, tenchu) using the same
-    weights as before (chest=3, head=2, tenchu=1 -> /6 = proximity %).
-    Names in `exclude` are skipped (used to avoid repeats across the
-    mindmap). Ties are shuffled before sorting so repeated queries surface
-    different people from a tied group."""
-    exclude = exclude or set()
-    matches = []
+    """Score every row in df against (head, chest, tenchu).
+    Weights: chest=3, head=2, tenchu=1 → max 6 → proximity %.
+    Uses EXACT equality after stripping 星/天中殺 suffixes so partial
+    substring matches (e.g. '牽牛' matching '牽牛星') no longer fire."""
+    exclude  = exclude or set()
+    h_clean  = _strip(head)
+    c_clean  = _strip(chest)
+    t_clean  = _strip(tenchu)
+    matches  = []
+
     if df is None or df.empty:
         return matches
 
@@ -212,14 +219,14 @@ def find_matches(df: pd.DataFrame, head: str, chest: str, tenchu: str,
         if name in exclude:
             continue
 
-        db_head   = str(row.get("頭 (Head)", "")).strip()
-        db_chest  = str(row.get("胸 (Chest)", "")).strip()
-        db_tenchu = str(row.get("Tenchusatsu", "")).strip()
+        db_head   = _strip(row.get("頭 (Head)", ""))
+        db_chest  = _strip(row.get("胸 (Chest)", ""))
+        db_tenchu = _strip(row.get("Tenchusatsu", ""))
 
         score = 0
-        if db_chest  and db_chest  in chest:  score += 3
-        if db_head   and db_head   in head:   score += 2
-        if db_tenchu and db_tenchu in tenchu: score += 1
+        if db_chest  and db_chest  == c_clean: score += 3
+        if db_head   and db_head   == h_clean: score += 2
+        if db_tenchu and db_tenchu == t_clean: score += 1
 
         if score > 0:
             matches.append({
@@ -228,7 +235,9 @@ def find_matches(df: pd.DataFrame, head: str, chest: str, tenchu: str,
                 "themes":    row.get("Life Patterns or Behavioral Themes", "No context available"),
                 "birthdate": str(row.get("Birthdate", "")).strip(),
                 "wd_id":     str(row.get("wd_id", "")).strip(),
-                "head": db_head, "chest": db_chest, "tenchu": db_tenchu,
+                "head":   db_head,
+                "chest":  db_chest,
+                "tenchu": db_tenchu,
                 "proximity": int((score / 6) * 100),
             })
 
@@ -243,31 +252,40 @@ def find_matches(df: pd.DataFrame, head: str, chest: str, tenchu: str,
 MINDMAP_BRANCHING = {1: 5, 2: 2, 3: 1}
 
 def build_mindmap(df: pd.DataFrame, head: str, chest: str, tenchu: str) -> dict:
+    # Strip suffixes at the entry point — everything downstream uses clean names
+    h = _strip(head)
+    c = _strip(chest)
+    t = _strip(tenchu)
+
     nodes = [{
         "id": "you", "name": "You", "degree": 0, "parent": None,
         "domain": "", "themes": "", "birthdate": "", "wd_id": "",
-        "head": head, "chest": chest, "tenchu": tenchu, "proximity": 100,
-        "head_el": ELEMENT_MAP.get(head.replace("星",""), "?"),
-        "chest_el": ELEMENT_MAP.get(chest.replace("星",""), "?"),
+        "head": h, "chest": c, "tenchu": t, "proximity": 100,
+        "head_el": ELEMENT_MAP.get(h, "?"),
+        "chest_el": ELEMENT_MAP.get(c, "?"),
     }]
-    links = []
-    seen = set()
-    frontier = [("you", head, chest, tenchu)]
+    links   = []
+    seen    = set()
+    frontier = [("you", h, c, t)]
 
     for degree in (1, 2, 3):
-        n_children = MINDMAP_BRANCHING[degree]
+        n_children   = MINDMAP_BRANCHING[degree]
         next_frontier = []
         for parent_id, p_head, p_chest, p_tenchu in frontier:
             for m in find_matches(df, p_head, p_chest, p_tenchu, exclude=seen, top_n=n_children):
                 seen.add(m["name"])
                 nodes.append({
                     "id": m["name"], "name": m["name"], "degree": degree, "parent": parent_id,
-                    "domain": m["domain"], "themes": m["themes"], "birthdate": m["birthdate"],
-                    "wd_id": m["wd_id"],
-                    "head": m["head"], "chest": m["chest"], "tenchu": m["tenchu"],
+                    "domain":    m["domain"],
+                    "themes":    m["themes"],
+                    "birthdate": m["birthdate"],
+                    "wd_id":     m["wd_id"],
+                    "head":      m["head"],
+                    "chest":     m["chest"],
+                    "tenchu":    m["tenchu"],
                     "proximity": m["proximity"],
-                    "head_el": ELEMENT_MAP.get(m["head"], "?"),
-                    "chest_el": ELEMENT_MAP.get(m["chest"], "?"),
+                    "head_el":   ELEMENT_MAP.get(m["head"], "?"),
+                    "chest_el":  ELEMENT_MAP.get(m["chest"], "?"),
                 })
                 links.append({"source": parent_id, "target": m["name"], "proximity": m["proximity"]})
                 next_frontier.append((m["name"], m["head"], m["chest"], m["tenchu"]))
