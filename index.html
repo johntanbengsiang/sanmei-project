@@ -720,8 +720,6 @@ function buildMindMap(graph, inputDate){
     const GLOW_ID={0:'mg0',1:'mg1',2:'mg2',3:'mg3'};
 
     // ── NEBULA BACKGROUND BLOBS ────────────────────────────────────────
-    // One ambient glow per archetype, positioned at the centroid of its
-    // members so the "constellation" look emerges organically.
     const archetypeNodes={};
     nodes.forEach(n=>{
         if(n.degree===0) return;
@@ -730,36 +728,34 @@ function buildMindMap(graph, inputDate){
     });
     const nebulaG=zoomLayer.append('g').attr('id','nebulae');
     Object.entries(archetypeNodes).forEach(([arch,members])=>{
-        // Centroid initialised to the rough D1/D2/D3 spread — updated after sim settles
         const col=DEGREE_COLOR[members[0].degree]||'#7C6FEB';
         nebulaG.append('circle')
             .attr('class','nebula-blob').attr('data-arch',arch)
             .attr('cx',cx).attr('cy',cy)
-            .attr('r',Math.sqrt(members.length)*28)
-            .attr('fill',col).attr('opacity',0.04);
+            .attr('r',Math.sqrt(members.length)*14)   // was *28 — halved
+            .attr('fill',col).attr('opacity',0.035);  // was 0.04
     });
 
     // ── FORCE SIMULATION ───────────────────────────────────────────────
-    // Key idea: nodes repel each other but are pulled toward their
-    // "archetype centroid" — same head+chest element pair cluster together
-    // naturally. No rigid rings at all.
-
-    // Archetype centroids scattered around cx,cy at varied angles
+    // Archetype centroids placed on degree-scaled rings around cx,cy
     const archetypeKeys=Object.keys(archetypeNodes);
     const centroid={};
     archetypeKeys.forEach((k,i)=>{
         const a=(i/archetypeKeys.length)*Math.PI*2;
-        const r=120+Math.random()*60;
+        // Wider spread: degree-1-dominant archetypes close in, degree-3 further
+        const members=archetypeNodes[k];
+        const maxDeg=Math.max(...members.map(n=>n.degree));
+        const r=80+maxDeg*55+(Math.random()-0.5)*30;
         centroid[k]={ x:cx+Math.cos(a)*r, y:cy+Math.sin(a)*r };
     });
 
-    // Initialise positions: "you" at centre, others scattered
+    // Initialise positions closer to their centroid
     nodes.forEach(n=>{
         if(n.degree===0){ n.x=cx; n.y=cy; n.fx=cx; n.fy=cy; return; }
         const k=`${n.head_el||'?'}/${n.chest_el||'?'}`;
         const c2=centroid[k]||{x:cx,y:cy};
         const angle=Math.random()*Math.PI*2;
-        const r=n.degree*60+Math.random()*40;
+        const r=20+Math.random()*30;
         n.x=c2.x+Math.cos(angle)*r;
         n.y=c2.y+Math.sin(angle)*r;
     });
@@ -792,8 +788,8 @@ function buildMindMap(graph, inputDate){
         .selectAll('g').data(nodes).enter().append('g').attr('class','nd');
 
     // Aura
-    ng.append('circle').attr('r',d=>(DEGREE_SIZE[d.degree]||6)*2.2)
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0.06);
+    ng.append('circle').attr('r',d=>(DEGREE_SIZE[d.degree]||6)*1.6)
+        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0.07);
 
     // Main dot
     ng.append('circle').attr('r',d=>DEGREE_SIZE[d.degree]||6)
