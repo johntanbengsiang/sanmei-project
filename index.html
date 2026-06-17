@@ -995,7 +995,8 @@ async function calculateProfile(){
         'Extracting heavenly stems & earthly branches…',
         'Computing 60-cycle matrix…',
         'Scanning historical parallels database…',
-        'Initiating AI synthesis…'
+        'Initiating AI synthesis…',
+        'Server waking up — this may take up to 60s on first use…',
     ];
     let mi=0;
     const tick=setInterval(()=>{
@@ -1012,7 +1013,29 @@ async function calculateProfile(){
                 year:parseInt(year),cf_token:token
             })
         });
-        if(!res.ok) throw new Error('API error '+res.status);
+
+        if(res.status===403){
+            // Turnstile token expired (common on Render cold-start which takes 30-60s)
+            // Reset widget so user can re-verify, then resubmit automatically
+            clearInterval(tick);
+            document.getElementById('loader').style.display='none';
+            btn.disabled=false;
+            turnstile.reset();
+            // Show inline message rather than a jarring alert
+            const loaderEl=document.getElementById('loader');
+            loaderEl.style.display='block';
+            document.getElementById('loaderMsg').textContent=
+                'Security token expired during server wake-up. Please tick the verification box again, then press Calculate.';
+            // Hide loader message after 4s so they can see the widget
+            setTimeout(()=>{ loaderEl.style.display='none'; }, 4000);
+            return;
+        }
+
+        if(!res.ok){
+            const detail = await res.json().catch(()=>({}));
+            throw new Error(detail.detail || `Server error ${res.status}`);
+        }
+
         const data=await res.json();
         runtimeChart=data.chart;
 
