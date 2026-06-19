@@ -671,218 +671,227 @@ function showMeta(pos){
     }
 }
 
-/* ── MIND MAP — NEBULA FORCE SIMULATION ── */
-// Degree colour: You=gold, 1=violet, 2=teal, 3=rose
+/* ── MIND MAP — DETERMINISTIC RADIAL TREE ── */
 const DEGREE_COLOR = {0:'#E8B86D', 1:'#7C6FEB', 2:'#4ECDC4', 3:'#FF6B9D'};
-const DEGREE_SIZE  = {0:20, 1:13, 2:9, 3:6};
+const DEGREE_R     = {0:20, 1:14, 2:10, 3:7};   // node dot radius
 const DEGREE_LABEL = {1:'Degree 1 · Closest Parallel', 2:'Degree 2 Connection', 3:'Degree 3 Connection'};
 
-function truncateName(name, n){
-    return name && name.length > n ? name.slice(0, n-1)+'…' : (name||'');
-}
+let _mmSim = null; // kept for cleanup compat
 
-// Keep the active simulation so we can stop it on rebuild
-let _mmSim = null;
-
-function buildMindMap(graph, inputDate){
+function buildMindMap(graph){
     if(_mmSim){ _mmSim.stop(); _mmSim=null; }
 
-    const svg=d3.select('#proxSvg');
+    const svg  = d3.select('#proxSvg');
     svg.selectAll('*').remove();
 
-    const nodes=(graph.nodes||[]).map(n=>({...n}));
-    const links=(graph.links||[]).map(l=>({...l}));
-    if(nodes.length===0) return;
+    const rawNodes = (graph.nodes||[]).map(n=>({...n}));
+    const rawLinks = (graph.links||[]).map(l=>({...l}));
+    if(!rawNodes.length) return;
 
     const W=660, H=660, cx=W/2, cy=H/2;
     svg.attr('viewBox',`0 0 ${W} ${H}`);
 
-    // ── ZOOM ──────────────────────────────────────────────────────────
-    const zoomLayer = svg.append('g').attr('id','zoomLayer');
+    /* ── ZOOM ─────────────────────────────────────────────────── */
+    const zoomLayer = svg.append('g');
     const zoom = d3.zoom().scaleExtent([0.25,5])
         .on('zoom', e => zoomLayer.attr('transform', e.transform));
     svg.call(zoom).on('dblclick.zoom', null);
-    const btnIn=document.getElementById('zmIn'), btnOut=document.getElementById('zmOut'), btnReset=document.getElementById('zmReset');
-    if(btnIn)    btnIn.onclick    = ()=>svg.transition().duration(250).call(zoom.scaleBy,1.35);
-    if(btnOut)   btnOut.onclick   = ()=>svg.transition().duration(250).call(zoom.scaleBy,1/1.35);
-    if(btnReset) btnReset.onclick = ()=>svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity);
-    // ──────────────────────────────────────────────────────────────────
+    ['zmIn','zmOut','zmReset'].forEach(id=>{
+        const b=document.getElementById(id); if(!b) return;
+        if(id==='zmIn')    b.onclick=()=>svg.transition().duration(220).call(zoom.scaleBy,1.35);
+        if(id==='zmOut')   b.onclick=()=>svg.transition().duration(220).call(zoom.scaleBy,1/1.35);
+        if(id==='zmReset') b.onclick=()=>svg.transition().duration(300).call(zoom.transform,d3.zoomIdentity);
+    });
 
-    // Glow filter
-    const defs=svg.append('defs');
-    ['#E8B86D','#7C6FEB','#4ECDC4','#FF6B9D'].forEach((col,i)=>{
-        const f=defs.append('filter').attr('id',`mg${i}`);
-        f.append('feGaussianBlur').attr('stdDeviation','5').attr('result','b');
+    /* ── GLOW DEFS ─────────────────────────────────────────────── */
+    const defs = svg.append('defs');
+    Object.entries(DEGREE_COLOR).forEach(([deg,col])=>{
+        const id=`glow${deg}`;
+        const f=defs.append('filter').attr('id',id).attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+        f.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','4').attr('result','b');
         const m=f.append('feMerge');
         m.append('feMergeNode').attr('in','b');
         m.append('feMergeNode').attr('in','SourceGraphic');
     });
-    const GLOW_ID={0:'mg0',1:'mg1',2:'mg2',3:'mg3'};
 
-    // ── NEBULA BACKGROUND BLOBS ────────────────────────────────────────
-    const archetypeNodes={};
-    nodes.forEach(n=>{
-        if(n.degree===0) return;
-        const k=`${n.head_el||'?'}/${n.chest_el||'?'}`;
-        (archetypeNodes[k]=archetypeNodes[k]||[]).push(n);
+    /* ── DETERMINISTIC LAYOUT ──────────────────────────────────────
+       Ring radii — generous spacing so labels never overlap         */
+    const RING_R = {1:115, 2:230, 3:320};
+
+    // Build parent→children map
+    const childrenOf = {};
+    rawLinks.forEach(l=>{
+        const src = typeof l.source==='object'? l.source.id : l.source;
+        (childrenOf[src] = childrenOf[src]||[]).push(typeof l.target==='object'? l.target.id : l.target);
     });
-    const nebulaG=zoomLayer.append('g').attr('id','nebulae');
-    Object.entries(archetypeNodes).forEach(([arch,members])=>{
-        const col=DEGREE_COLOR[members[0].degree]||'#7C6FEB';
-        nebulaG.append('circle')
-            .attr('class','nebula-blob').attr('data-arch',arch)
-            .attr('cx',cx).attr('cy',cy)
-            .attr('r',Math.sqrt(members.length)*14)   // was *28 — halved
-            .attr('fill',col).attr('opacity',0.035);  // was 0.04
-    });
+    const nodeById = Object.fromEntries(rawNodes.map(n=>[n.id,n]));
 
-    // ── FORCE SIMULATION ───────────────────────────────────────────────
-    // Archetype centroids placed on degree-scaled rings around cx,cy
-    const archetypeKeys=Object.keys(archetypeNodes);
-    const centroid={};
-    archetypeKeys.forEach((k,i)=>{
-        const a=(i/archetypeKeys.length)*Math.PI*2;
-        // Wider spread: degree-1-dominant archetypes close in, degree-3 further
-        const members=archetypeNodes[k];
-        const maxDeg=Math.max(...members.map(n=>n.degree));
-        const r=80+maxDeg*55+(Math.random()-0.5)*30;
-        centroid[k]={ x:cx+Math.cos(a)*r, y:cy+Math.sin(a)*r };
-    });
-
-    // Initialise positions closer to their centroid
-    nodes.forEach(n=>{
-        if(n.degree===0){ n.x=cx; n.y=cy; n.fx=cx; n.fy=cy; return; }
-        const k=`${n.head_el||'?'}/${n.chest_el||'?'}`;
-        const c2=centroid[k]||{x:cx,y:cy};
-        const angle=Math.random()*Math.PI*2;
-        const r=20+Math.random()*30;
-        n.x=c2.x+Math.cos(angle)*r;
-        n.y=c2.y+Math.sin(angle)*r;
-    });
-
-    const byId=new Map(nodes.map(n=>[n.id,n]));
-    const linkData=links.map(l=>({
-        source:byId.get(typeof l.source==='object'?l.source.id:l.source),
-        target:byId.get(typeof l.target==='object'?l.target.id:l.target),
-        proximity:l.proximity
-    })).filter(l=>l.source&&l.target);
-
-    // Links (drawn behind nodes)
-    const linkSel=zoomLayer.append('g').attr('id','links')
-        .selectAll('line').data(linkData).enter().append('line')
-        .attr('stroke',d=>DEGREE_COLOR[d.target.degree]||'#4ECDC4')
-        .attr('stroke-width',0.9).attr('stroke-dasharray','3 5')
-        .attr('opacity',0)
-        .transition().duration(600).delay((_,i)=>i*30).attr('opacity',d=>({1:.7,2:.4,3:.2}[d.target.degree]||.15));
-
-    // Proximity % labels on links
-    const linkLabSel=zoomLayer.append('g').attr('id','link-labels')
-        .selectAll('text').data(linkData).enter().append('text')
-        .attr('text-anchor','middle').attr('font-size','6px')
-        .attr('fill',d=>DEGREE_COLOR[d.target.degree]).attr('opacity',0)
-        .text(d=>`${d.proximity}%`)
-        .transition().duration(400).delay((_,i)=>i*30+300).attr('opacity',.65);
-
-    // Node groups
-    const ng=zoomLayer.append('g').attr('id','nodes')
-        .selectAll('g').data(nodes).enter().append('g').attr('class','nd');
-
-    // Aura
-    ng.append('circle').attr('r',d=>(DEGREE_SIZE[d.degree]||6)*1.6)
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0.07);
-
-    // Main dot
-    ng.append('circle').attr('r',d=>DEGREE_SIZE[d.degree]||6)
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('opacity',0)
-        .attr('filter',d=>`url(#${GLOW_ID[d.degree]})`)
-        .transition().duration(500).delay((_,i)=>i*40)
-        .attr('opacity',d=>d.degree===0?.95:.82);
-
-    // ★ for "you"
-    ng.filter(d=>d.degree===0).append('text')
-        .attr('text-anchor','middle').attr('dy','.38em')
-        .attr('font-size','11px').attr('fill','#fff').attr('pointer-events','none')
-        .attr('opacity',0).text('★')
-        .transition().duration(400).delay(60).attr('opacity',1);
-
-    // % inside degree-1 and degree-2 nodes
-    ng.filter(d=>d.degree===1||d.degree===2).append('text')
-        .attr('text-anchor','middle').attr('dy','.38em').attr('pointer-events','none')
-        .attr('font-size',d=>d.degree===1?'7.5px':'6px').attr('fill','#fff').attr('font-weight','700')
-        .attr('opacity',0).text(d=>`${d.proximity}%`)
-        .transition().duration(400).delay((_,i)=>i*40+200).attr('opacity',.95);
-
-    // Name labels (floating freely — position updated each tick)
-    const nameSel=zoomLayer.append('g').attr('id','name-labels')
-        .selectAll('text').data(nodes.filter(n=>n.degree<=2)).enter().append('text')
-        .attr('text-anchor','middle').attr('pointer-events','none')
-        .attr('font-size',d=>d.degree===0?'11px':d.degree===1?'8.5px':'7px')
-        .attr('fill',d=>DEGREE_COLOR[d.degree]).attr('font-family','Noto Serif JP,serif')
-        .attr('opacity',0)
-        .text(d=>d.degree===0?'You':d.name)
-        .transition().duration(500).delay((_,i)=>i*40+250).attr('opacity',1);
-
-    // Click + hover
-    ng.filter(d=>d.degree>0).style('cursor','pointer')
-        .on('click',(event,d)=>{ event.stopPropagation(); openNodeModal(d); })
-        .on('mouseover',function(){ d3.select(this).select('circle:nth-child(2)').transition().duration(100).attr('opacity',1); })
-        .on('mouseout', function(){ d3.select(this).select('circle:nth-child(2)').transition().duration(100).attr('opacity',.82); });
-
-    // ── TICK ──────────────────────────────────────────────────────────
-    function ticked(){
-        // Links
-        zoomLayer.selectAll('#links line')
-            .attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
-            .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-
-        // Link labels at midpoint
-        zoomLayer.selectAll('#link-labels text')
-            .attr('x',d=>(d.source.x+d.target.x)/2)
-            .attr('y',d=>(d.source.y+d.target.y)/2-4);
-
-        // Node groups
-        ng.attr('transform',d=>`translate(${d.x},${d.y})`);
-
-        // Name labels offset below each node
-        nameSel.attr('x',d=>d.x).attr('y',d=>d.y+(DEGREE_SIZE[d.degree]||6)+11);
-
-        // Drift nebula blobs toward archetype centroid of live positions
-        nebulaG.selectAll('.nebula-blob').each(function(){
-            const arch=d3.select(this).attr('data-arch');
-            const members=archetypeNodes[arch];
-            if(!members||!members.length) return;
-            const mx=members.reduce((s,n)=>s+n.x,0)/members.length;
-            const my=members.reduce((s,n)=>s+n.y,0)/members.length;
-            d3.select(this).attr('cx',mx).attr('cy',my);
+    // Assign (x,y) recursively: each parent allocates an angular sector to its children
+    function assignPositions(parentId, parentAngle, sectorWidth, depth){
+        const kids = childrenOf[parentId]||[];
+        if(!kids.length) return;
+        const n = kids.length;
+        kids.forEach((kidId,i)=>{
+            const node = nodeById[kidId];
+            if(!node) return;
+            // Evenly spread children across the sector, centred on parentAngle
+            const a = n===1
+                ? parentAngle
+                : parentAngle - sectorWidth/2 + sectorWidth * (i/(n-1));
+            const r = RING_R[depth]||320;
+            node.x = cx + Math.cos(a)*r;
+            node.y = cy + Math.sin(a)*r;
+            node._angle = a;
+            // Children get a subsector proportional to their share
+            const childSector = sectorWidth / Math.max(n,1) * 0.88;
+            assignPositions(kidId, a, childSector, depth+1);
         });
     }
 
-    // Force simulation — key forces:
-    // • forceLink  : keep connected nodes close (but loose)
-    // • forceManyBody: gentle repulsion so nodes spread out
-    // • forceX/Y archetype: pull same-archetype nodes toward shared centroid
-    // • forceX/Y degree: gentle concentric bias (not rings — just bias)
-    // • forceCenter : keep the cloud centred
-    const DEGREE_PULL_R={1:90,2:175,3:255};
+    // Degree-1 nodes spread across the full circle
+    const d1kids = childrenOf['you']||[];
+    const fullCircle = 2*Math.PI;
+    d1kids.forEach((id,i)=>{
+        const node = nodeById[id];
+        if(!node) return;
+        const a = -Math.PI/2 + fullCircle*(i/d1kids.length);
+        node.x = cx + Math.cos(a)*RING_R[1];
+        node.y = cy + Math.sin(a)*RING_R[1];
+        node._angle = a;
+        const sector = fullCircle/d1kids.length * 0.82;
+        assignPositions(id, a, sector, 2);
+    });
 
-    _mmSim=d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(linkData).distance(d=>({1:50,2:70,3:55}[d.target.degree]||55)).strength(.12))
-        .force('charge', d3.forceManyBody().strength(-30).distanceMax(180))
-        .force('collide', d3.forceCollide(d=>(DEGREE_SIZE[d.degree]||6)+4))
-        .force('archX', d3.forceX(d=>{
-            if(d.degree===0) return cx;
-            const k=`${d.head_el||'?'}/${d.chest_el||'?'}`;
-            return (centroid[k]||{x:cx}).x;
-        }).strength(d=>d.degree===0?0:.18))
-        .force('archY', d3.forceY(d=>{
-            if(d.degree===0) return cy;
-            const k=`${d.head_el||'?'}/${d.chest_el||'?'}`;
-            return (centroid[k]||{y:cy}).y;
-        }).strength(d=>d.degree===0?0:.18))
-        .force('degR', d3.forceRadial(d=>DEGREE_PULL_R[d.degree]||0, cx, cy).strength(d=>d.degree===0?0:.08))
-        .force('center', d3.forceCenter(cx,cy).strength(.04))
-        .alphaDecay(0.018)
-        .on('tick', ticked);
+    // "You" always at centre
+    const youNode = nodeById['you'];
+    if(youNode){ youNode.x=cx; youNode.y=cy; }
+
+    /* ── DRAW ORBIT RINGS (subtle) ─────────────────────────────── */
+    Object.entries(RING_R).forEach(([deg,r])=>{
+        zoomLayer.append('circle')
+            .attr('cx',cx).attr('cy',cy).attr('r',r)
+            .attr('fill','none')
+            .attr('stroke',DEGREE_COLOR[+deg])
+            .attr('stroke-width',0.4)
+            .attr('stroke-dasharray','2 8')
+            .attr('opacity',0.2);
+    });
+
+    /* ── DRAW LINKS ─────────────────────────────────────────────── */
+    const linkG = zoomLayer.append('g');
+    rawLinks.forEach(l=>{
+        const sid = typeof l.source==='object'? l.source.id : l.source;
+        const tid = typeof l.target==='object'? l.target.id : l.target;
+        const s = nodeById[sid], t = nodeById[tid];
+        if(!s||!t) return;
+
+        const col = DEGREE_COLOR[t.degree]||'#4ECDC4';
+        const op  = {1:.65, 2:.4, 3:.25}[t.degree]||.2;
+        const mx  = (s.x+t.x)/2, my=(s.y+t.y)/2;
+
+        // Link line
+        linkG.append('line')
+            .attr('x1',s.x).attr('y1',s.y).attr('x2',t.x).attr('y2',t.y)
+            .attr('stroke',col).attr('stroke-width',1.2)
+            .attr('stroke-dasharray','4 5').attr('opacity',op);
+
+        // Proximity % badge on link midpoint
+        const prox = l.proximity||'';
+        if(prox){
+            linkG.append('rect')
+                .attr('x',mx-10).attr('y',my-6)
+                .attr('width',20).attr('height',11)
+                .attr('rx',4).attr('fill','rgba(11,11,24,.75)');
+            linkG.append('text')
+                .attr('x',mx).attr('y',my+3.5)
+                .attr('text-anchor','middle')
+                .attr('font-size','7px').attr('font-weight','600')
+                .attr('fill',col).attr('opacity',0.9)
+                .text(`${prox}%`);
+        }
+    });
+
+    /* ── DRAW NODES ─────────────────────────────────────────────── */
+    const nodeG = zoomLayer.append('g')
+        .selectAll('g').data(rawNodes).enter().append('g')
+        .attr('class','nd')
+        .attr('transform',d=>`translate(${d.x??cx},${d.y??cy})`);
+
+    // Outer glow aura
+    nodeG.append('circle')
+        .attr('r', d=>DEGREE_R[d.degree]*1.8)
+        .attr('fill', d=>DEGREE_COLOR[d.degree])
+        .attr('opacity', 0.08);
+
+    // Main dot
+    nodeG.append('circle')
+        .attr('r', d=>DEGREE_R[d.degree])
+        .attr('fill', d=>DEGREE_COLOR[d.degree])
+        .attr('filter', d=>`url(#glow${d.degree})`)
+        .attr('opacity', 0.9);
+
+    // ★ for "you"
+    nodeG.filter(d=>d.degree===0).append('text')
+        .attr('text-anchor','middle').attr('dy','.35em')
+        .attr('font-size','11px').attr('fill','#fff')
+        .attr('pointer-events','none').text('★');
+
+    // % score inside degree-1/2 dots
+    nodeG.filter(d=>d.degree===1||d.degree===2).append('text')
+        .attr('text-anchor','middle').attr('dy','.35em')
+        .attr('font-size',d=>d.degree===1?'7px':'6px')
+        .attr('fill','#fff').attr('font-weight','700')
+        .attr('pointer-events','none')
+        .text(d=>`${d.proximity}%`);
+
+    /* ── NAME LABELS ─────────────────────────────────────────────
+       Smart positioning: label pushed away from centre along the
+       node's own radial angle, so it never overlaps the dot      */
+    rawNodes.forEach(n=>{
+        if(n.degree===0) return; // "You" text drawn elsewhere
+        const nr   = DEGREE_R[n.degree];
+        const ang  = n._angle??0;
+        // Push label outward along node's angle
+        const gap  = nr + (n.degree===1? 14 : 11);
+        const lx   = (n.x??cx) + Math.cos(ang)*gap;
+        const ly   = (n.y??cy) + Math.sin(ang)*gap;
+        const fs   = n.degree===1? '8.5px' : n.degree===2? '7.5px' : '6.5px';
+        const anch = Math.abs(Math.cos(ang)) < 0.15 ? 'middle'
+                   : Math.cos(ang)>0 ? 'start' : 'end';
+
+        // Max chars based on degree so degree-3 labels still fit
+        const maxCh = n.degree===1? 18 : n.degree===2? 15 : 12;
+        const label = n.name.length > maxCh ? n.name.slice(0,maxCh-1)+'…' : n.name;
+
+        zoomLayer.append('text')
+            .attr('x',lx).attr('y',ly)
+            .attr('text-anchor',anch)
+            .attr('font-size',fs)
+            .attr('font-family','Noto Serif JP,serif')
+            .attr('fill',DEGREE_COLOR[n.degree])
+            .attr('pointer-events','none')
+            .attr('opacity',0.92)
+            .text(label);
+    });
+
+    // "You" label below centre dot
+    zoomLayer.append('text')
+        .attr('x',cx).attr('y',cy+DEGREE_R[0]+13)
+        .attr('text-anchor','middle').attr('font-size','10px')
+        .attr('fill',DEGREE_COLOR[0]).attr('font-family','Noto Serif JP,serif')
+        .attr('opacity',0.9).text('You');
+
+    /* ── INTERACTIONS ────────────────────────────────────────────── */
+    nodeG.filter(d=>d.degree>0).style('cursor','pointer')
+        .on('click',(event,d)=>{ event.stopPropagation(); openNodeModal(d); })
+        .on('mouseover',function(event,d){
+            d3.select(this).select('circle:nth-child(2)')
+                .transition().duration(100).attr('r',DEGREE_R[d.degree]*1.4).attr('opacity',1);
+        })
+        .on('mouseout',function(event,d){
+            d3.select(this).select('circle:nth-child(2)')
+                .transition().duration(100).attr('r',DEGREE_R[d.degree]).attr('opacity',0.9);
+        });
 }
 
 
@@ -1053,9 +1062,9 @@ async function calculateProfile(){
         document.getElementById('voidPill').textContent='天中殺 · '+data.chart.tenchusatsu;
         document.getElementById('voidVal').textContent=data.chart.tenchusatsu;
 
-        // Mind map (replaces old 3-node proximity viz)
+        // Mind map
         const dStr=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-        buildMindMap(data.mindmap||{nodes:[],links:[]}, dStr);
+        buildMindMap(data.mindmap||{nodes:[],links:[]});
 
         // AI — shimmer while "loading", then reveal
         document.getElementById('aiStatus').textContent='Synthesizing cosmic interpretation…';
